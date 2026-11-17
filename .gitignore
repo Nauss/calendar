@@ -1,0 +1,27 @@
+.gradle/
+.kotlin/
+**/build/
+local.properties
+.idea/
+*.iml
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pfx
+artifacts/
+.ops/
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/config.local.json
+*.log
+__pycache__/
+.venv/
+# Owner-local brief and execution context, not product source.
+AGENTS.md
+PRODUCT.md
+PLAN.md
+IDEA.md
+.impeccable/
+!gradle/wrapper/gradle-wrapper.jar

@@ -1,0 +1,3 @@
+# Disposable loopback-only integration infrastructure, not app dependencies.
+radicale==3.5.7
+requests==2.34.2
