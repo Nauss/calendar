@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widgets">Widgets</string>
+    <string name="widget_planning">Agenda · Schedule</string>
+    <string name="widget_month">Agenda · Month</string>
+    <string name="widget_planning_description">Your next 31 days, from the visible calendars saved on this device.</string>
+    <string name="widget_month_description">A month grid with event markers. Each widget keeps its own month.</string>
+    <string name="widget_pin_planning">Add Schedule widget</string>
+    <string name="widget_pin_month">Add Month widget</string>
+    <string name="widget_pin_hint">Your launcher controls placement. It may ask you to confirm.</string>
+    <string name="widget_pin_requested">Request sent to the launcher. Confirm placement there.</string>
+    <string name="widget_pin_manual">Touch and hold an empty area on your home screen, then choose Widgets → Agenda.</string>
+    <string name="widget_loading">Loading saved calendars…</string>
+    <string name="widget_empty">No events in the next 31 days</string>
+    <string name="widget_error">Some events could not be displayed. Open Agenda to review.</string>
+    <string name="widget_more">Limited preview · open Agenda for all events</string>
+    <string name="widget_open">Open Agenda</string>
+    <string name="widget_refresh">Refresh saved calendars</string>
+    <string name="widget_preview_label">Illustrative preview · no real events</string>
+    <string name="widget_preview_title">Example appointment</string>
+    <string name="widget_preview_time">09:00–10:00</string>
+    <string name="widget_preview_day">Tue 17</string>
+    <string name="widget_preview_month">November 2026</string>
+    <string name="widget_cache_hint">Saved calendars · next 31 days</string>
+    <string name="widget_has_events">%1$s · events</string>
+    <string name="widget_route_unavailable">This event is no longer available, has moved, or its calendar is hidden.</string>
+    <string name="event_day_part">Day %1$d of %2$d</string>
+    <string name="widget_host_title">Debug widget host · saved cache only</string>
+    <string name="widget_host_bind">Allow this test host to display widgets</string>
+    <string name="widget_host_resize">Resize widgets</string>
+    <string name="widget_host_clear">Remove test-host widgets</string>
+</resources>

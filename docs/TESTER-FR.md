@@ -14,6 +14,12 @@ L’APK est signé pour les tests. Ce n’est pas encore la signature de publica
 Play Store. Avant une future réinstallation avec une autre signature, il faudra
 préserver les événements locaux et synchroniser les modifications en attente.
 
+Pour mettre à jour une alpha existante signée avec le même certificat, installer
+la nouvelle APK **par-dessus**, sans désinstaller Agenda ni effacer ses données.
+La configuration et le cache doivent être conservés. Si Android refuse la mise
+à jour, ne pas contourner le problème en supprimant les données : conserver le
+message d’erreur et vérifier d’abord le certificat/la version.
+
 ## D’abord sans serveur
 
 Créer un rendez-vous local, le modifier, essayer une journée entière, une répétition
@@ -70,8 +76,55 @@ quoi que ce soit. Aucun nettoyage automatique n’est prévu.
 Les rappels de cette alpha sont **silencieux et non exacts**. Les événements importés
 complexes peuvent être protégés contre l’édition/la suppression ; les lire et les
 exporter reste possible lorsque leur format est pris en charge. Les invitations,
-les modifications d’une seule occurrence, les widgets et la migration Google ne
+les modifications d’une seule occurrence et la migration Google ne
 font pas partie de cette version.
+
+## Modifier un rendez-vous importé
+
+Ouvrir le rendez-vous puis **Modifier**. Les rendez-vous individuels usuels sont
+modifiables, y compris lorsqu’ils contiennent un fuseau horaire intégré. Les
+champs non pris en charge restent verrouillés avec une explication : par exemple
+les horaires d’une série complexe, une règle de récurrence importée, des rappels
+complexes ou un fuseau dont les règles ne correspondent pas à l’heure choisie.
+Les titres, lieux et notes peuvent rester modifiables sans toucher à ces structures.
+Les invitations restent protégées ; ne pas forcer leur conversion en événement
+simple. Une modification de série concerne la série, pas seulement l’occurrence.
+Les rares fuseaux intégrés dont le décalage UTC comporte des secondes non nulles
+ne sont pas pris en charge : ils sont refusés plutôt que réécrits avec un arrondi.
+
+Si un widget ou une notification ouvre une autre destination pendant une
+modification, un brouillon modifié exige une confirmation d’abandon. **Annuler**
+conserve la saisie. La rotation conserve également le brouillon et cette demande.
+
+Essayer d’abord un événement de test, modifier l’horaire, attendre la fin de la
+synchronisation puis vérifier dans le serveur. Une modification concurrente doit
+afficher un conflit, jamais écraser silencieusement l’autre version.
+
+## Ajouter les widgets sur le téléphone
+
+1. Dans Agenda : menu → **Paramètres** → **Widgets**.
+2. Choisir **Ajouter le widget Planning** ou **Ajouter le widget Mois**.
+3. Confirmer dans le lanceur Android et choisir son emplacement.
+4. Autre accès : appui long sur un emplacement vide de l’écran d’accueil →
+   **Widgets** → **Agenda**. Un appui long sur le widget permet de le redimensionner.
+
+**Planning** affiche les 31 prochains jours du cache ; toucher un rendez-vous
+ouvre la bonne occurrence. **Mois** affiche les dates et des repères de présence
+d’événements ; toucher une date ouvre la vue Jour. Les flèches et Aujourd’hui
+agissent sur ce widget uniquement. Le bouton **+** ouvre la création dans Agenda.
+
+Les widgets suivent les calendriers visibles et le thème choisi dans l’app.
+Ils exposent les titres/horaires/lieux sur l’écran d’accueil : en tenir compte
+pour les événements confidentiels. Ils n’ajoutent aucun compte ni permission
+d’accès aux agendas système. Le rafraîchissement périodique n’est pas exact ;
+l’économie de batterie peut le retarder. L’action Actualiser relit le cache ;
+la synchronisation réseau demeure celle d’Agenda.
+
+Un message **Aperçu limité** ou une erreur signifie que le widget ne présente pas
+tout le calendrier : ouvrir l’app. Le Planning est limité à 64 lignes ; la lecture
+de cache des widgets et l’expansion des récurrences ont aussi des limites de sûreté.
+Les images du sélecteur de widgets sont des aperçus illustratifs, jamais des
+rendez-vous ajoutés dans votre agenda.
 
 ## Publier plus tard
 

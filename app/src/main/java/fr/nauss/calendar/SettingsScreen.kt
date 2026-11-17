@@ -53,6 +53,19 @@ import java.time.format.FormatStyle
             Choice(stringResource(R.string.appearance),state.theme,listOf("system" to stringResource(R.string.system_theme),"light" to stringResource(R.string.light_theme),"dark" to stringResource(R.string.dark_theme))) { app.store.setMeta("theme",it);onChanged() }
             Choice(stringResource(R.string.default_calendar),state.defaultCalendar,state.calendars.filter { it.writable && it.enabled }.map { it.id to calendarName(it) }) { app.store.setMeta("default_calendar",it);onChanged() }
             HorizontalDivider(Modifier.padding(vertical=8.dp))
+            Text(stringResource(R.string.widgets),style=MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.widget_pin_hint),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            listOf(PlanningWidgetProvider::class.java to R.string.widget_pin_planning,MonthWidgetProvider::class.java to R.string.widget_pin_month).forEach { (provider,label) ->
+                OutlinedButton(onClick={
+                    val manager=android.appwidget.AppWidgetManager.getInstance(context)
+                    val accepted=runCatching { manager.isRequestPinAppWidgetSupported && manager.requestPinAppWidget(android.content.ComponentName(context,provider),null,null) }.getOrDefault(false)
+                    scope.launch { snackbar.showSnackbar(context.getString(if(accepted) R.string.widget_pin_requested else R.string.widget_pin_manual)) }
+                },modifier=Modifier.fillMaxWidth().testTag(if(label==R.string.widget_pin_planning) "pin_planning" else "pin_month")) {
+                    Icon(if(label==R.string.widget_pin_planning) Icons.Default.ViewAgenda else Icons.Default.CalendarMonth,null)
+                    Spacer(Modifier.width(12.dp));Text(stringResource(label))
+                }
+            }
+            HorizontalDivider(Modifier.padding(vertical=8.dp))
             Text(stringResource(R.string.status),style=MaterialTheme.typography.titleMedium)
             if(state.syncing) LinearProgressIndicator(Modifier.fillMaxWidth())
             if(state.pending>0) Text(stringResource(R.string.pending,state.pending),color=MaterialTheme.colorScheme.primary)

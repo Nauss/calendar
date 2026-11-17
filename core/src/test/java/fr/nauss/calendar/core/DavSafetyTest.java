@@ -34,14 +34,14 @@ public class DavSafetyTest {
         assertThrows(java.io.IOException.class,()->client.report(url("/cal/")));
     }
     @Test public void foreignHrefNeverReceivesCredentials() {
-        assertThrows(IllegalArgumentException.class,()->client.get("http://localhost:"+server.getPort()+"/cal/a.ics"));
-        assertThrows(IllegalArgumentException.class,()->client.get(url("/cal/a.ics")+"?token=bad"));
+        assertThrows(IllegalArgumentException.class,()->client.get(url("/cal/"),"http://localhost:"+server.getPort()+"/cal/a.ics"));
+        assertThrows(IllegalArgumentException.class,()->client.get(url("/cal/"),url("/cal/a.ics")+"?token=bad"));
         assertEquals(0,server.getRequestCount());
     }
     @Test public void createConflictDoesNotReconcileByUidAlone() {
         String original=IcsCodecTest.ics("DTSTART:20261101T090000Z\r\nSUMMARY:Original");
         server.enqueue(new MockResponse().setResponseCode(412));server.enqueue(new MockResponse().setHeader("ETag","\"2\"").setBody(original.replace("SUMMARY:Original","SUMMARY:Remote changed")));
-        assertThrows(DavClient.ConflictException.class,()->client.put(url("/cal/a.ics"),null,original));
+        assertThrows(DavClient.ConflictException.class,()->client.put(url("/cal/"),url("/cal/a.ics"),null,original));
         assertEquals(2,server.getRequestCount());
     }
     @Test public void directCalendarDiscoveryAndNamespacedColor() throws Exception {

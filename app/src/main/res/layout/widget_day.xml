@@ -1,0 +1,8 @@
+<!-- Dense-calendar exception: each date owns its entire equal-width column. At
+     narrow phone sizes horizontal targets may be below 48dp, never the height.
+     Header controls remain 48dp; at 384dp the seven date columns also reach 48dp. -->
+<!-- The clicked text must not be a RemoteViews root: root fill-in intents are
+     handled as whole collection-row clicks, losing the individual day target. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content">
+    <TextView android:id="@+id/widget_day" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp" android:gravity="center" android:textSize="14sp" android:maxLines="2"/>
+</FrameLayout>

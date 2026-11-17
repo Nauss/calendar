@@ -9,7 +9,8 @@ or a pixel-for-pixel reproduction of Google Calendar.
 
 ## What it does
 
-- Agenda, day, three-day, week and month views.
+- Agenda with a date gutter and calendar-colored cards; day, three-day, week and
+  month views.
 - Create, edit and delete timed or all-day events, with location and notes.
 - Simple daily, weekly, monthly and yearly recurrence; guarded handling of imported
   complex events instead of destructive editing.
@@ -20,6 +21,10 @@ or a pixel-for-pixel reproduction of Google Calendar.
 - Conditional server writes and visible conflicts; local-copy recovery without
   silently replacing the server's version.
 - Native, silent, inexact reminders and individual iCalendar export.
+- Native home-screen widgets: a scrollable 31-day schedule and a navigable month
+  grid, using the same visible calendars and private offline cache.
+- Safer editing of imported appointments: ordinary embedded time zones, opaque
+  CalDAV resource names, and field-specific protection of complex structures.
 
 No ads, purchases, subscriptions, trackers, analytics, Google account SDK or
 Android Calendar Provider access. Android's open-source Jetpack libraries are
@@ -40,6 +45,23 @@ HTTPS is the default. Certificates and hostnames are verified. An explicitly
 warned HTTP option is limited to literal private/loopback IP addresses for trusted
 local testing; it sends credentials and events without transport encryption.
 Never use it as a substitute for fixing a production TLS configuration.
+
+### Home-screen widgets
+
+In **Settings → Widgets**, request **Schedule** or **Month**, then confirm placement
+in your launcher. Alternatively, long-press an empty home-screen area and choose
+**Widgets → Agenda**. The launcher controls placement and resizing.
+
+The schedule opens the tapped occurrence; the month opens the selected date.
+Each month widget navigates independently. The plus action creates an appointment
+in Agenda, rather than saving anything directly from the home screen. Widgets use
+cached events, respect hidden calendars, and refresh after local changes and sync.
+Their periodic refresh is inexact and subject to Android power management.
+
+Adding a widget exposes appointment titles, times and locations to your home screen
+and its launcher. Previews in the widget picker are illustrative, not your data.
+Large or partly unsupported calendars show a limited/error notice instead of
+claiming a complete preview; open Agenda for the full view.
 
 See [the French test guide](docs/TESTER-FR.md), [privacy](PRIVACY.md),
 [security](SECURITY.md) and [the roadmap](docs/ROADMAP.md).
@@ -74,8 +96,13 @@ to `.github/workflows/android.yml`. No successful remote CI run is claimed.
 ## Alpha boundaries
 
 One account; no invitation transport, attendee responses, per-occurrence editing,
-calendar administration, widgets or Google-calendar migration. Unsupported complex
-recurrence/meeting edits are read-only, with export available. Full calendar
+calendar administration or Google-calendar migration. Meetings remain protected.
+Complex recurrence/custom-zone imports can expose safe text edits while locking
+their dates, rules or reminders; the editor explains which fields are preserved.
+Ordinary individual events with matching embedded IANA rules can be moved, but
+ambiguous/nonexistent local times and divergent rules are rejected. Rare embedded
+UTC offsets with nonzero seconds are rejected rather than silently rounded by the
+underlying parser, including during metadata edits. Full calendar
 queries are used instead of incremental sync tokens. Recurrence expansion and
 responses have explicit safety limits. Search covers the selected year.
 

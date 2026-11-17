@@ -93,3 +93,32 @@ Keep the compact calendar-first shell, neutral dark surfaces, meaningful event
 colors, real time geometry, shared date selection, readable day/detail views and
 single FAB. Do not add marketing panels, decorative imagery, gradients, glass,
 extra floating controls or imitation Google branding.
+
+## Owner-requested refinement (17 November 2026)
+
+The owner provided a Google Calendar schedule screenshot and asked to keep the
+working base while refining its presentation. This new explicit reference takes
+precedence over the alpha's plain agenda rows: schedule cards use a dedicated
+10–12dp corner role, while timed-grid event geometry stays compact. Dates move
+into a left gutter with a prominent day number and circular Today marker. Colored
+appointment surfaces, stronger title/time/location hierarchy and day spacing
+replace repetitive rules and full-width day headings. Calendar colors remain
+meaningful; Google artwork, profile photos and task controls are not reproduced.
+
+Two native home-screen surfaces extend the same language: a scrollable Planning
+widget and a month-grid widget. Both read the private cache, respect visibility,
+open the relevant date/event, support light/dark and resizing, and expose actual
+empty/error states. The Android launcher owns placement and user confirmation.
+Their quality gate includes a real widget host, deep-link interaction and refresh
+tests, not just a static layout preview. The implementation passed those native
+checks and both widgets were placed through the actual Android launcher. At normal
+height the month shows all six weeks; it omits the redundant Open footer unless an
+error/limited-preview notice needs the space. Smaller sizes can scroll vertically.
+The seven dense month cells may be narrower than 48dp at minimum width; primary
+controls and date-cell heights remain 48dp, and non-overlap is tested down to 280dp.
+
+The editor puts the title first and capability explanations beside locked fields.
+Its compact detail toolbar keeps Modify visible. Widget navigation is consumed
+once; changing text size/rotating does not reopen an earlier event or discard an
+unsaved draft. Native screenshots and test scope are recorded in
+`docs/VERIFICATION.md`; they are not physical-device certification.

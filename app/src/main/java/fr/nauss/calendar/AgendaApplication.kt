@@ -15,11 +15,17 @@ open class AgendaApplication : Application() {
     open val vaultAlias: String get()="agenda-account-v1"
     open val reminderNamespace: String get()="production"
     open val reminderAlarmsEnabled: Boolean get()=true
+    open val productionWidgetsEnabled: Boolean get()=true
+    open val widgetNamespace: String get()="production"
+    open val widgetUseLegacyCollections: Boolean get()=android.os.Build.VERSION.SDK_INT<31
+    val widgetTestTargets: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    open fun onWidgetRendered(id: Int,snapshot: WidgetSnapshot) { }
+    private var widgetUpdatesReady=false
     open fun postReminder(id: String,notification: android.app.Notification) {
         if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) throw SecurityException("NOTIFICATION_PERMISSION")
         androidx.core.app.NotificationManagerCompat.from(this).notify(reminderNamespace,id.hashCode(),notification)
     }
-    val store: AgendaStore by lazy { AgendaStore(storageContext) }
+    val store: AgendaStore by lazy { AgendaStore(storageContext,onWidgetChange={ if(widgetUpdatesReady) WidgetUpdates.request(this) }) }
     val vault: CredentialVault by lazy { CredentialVault(storageContext,alias=vaultAlias) }
     val submissions by lazy { EventSubmissions(store,::afterEventCommit) }
     open fun afterEventCommit(id: String) {
@@ -30,7 +36,12 @@ open class AgendaApplication : Application() {
     override fun onCreate() {
         super.onCreate();store.setMeta("sync_running","0")
         if(backgroundSyncEnabled) { WorkManager.initialize(this,Configuration.Builder().build());SyncTasks.periodic(this) }
+        widgetUpdatesReady=true
         ReminderScheduler.channel(this)
+    }
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if(widgetUpdatesReady) WidgetUpdates.request(this)
     }
 }
 fun Context.agenda() = applicationContext as AgendaApplication

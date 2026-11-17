@@ -21,8 +21,8 @@ public final class SyncEngine {
         void applySnapshot(String calendar,List<DavClient.Resource> completeSnapshot);
     }
     public interface Transport {
-        DavClient.Resource put(String href,String etag,String ics) throws IOException;
-        void delete(String href,String etag) throws IOException;
+        DavClient.Resource put(String calendar,String href,String etag,String ics) throws IOException;
+        void delete(String calendar,String href,String etag) throws IOException;
         List<DavClient.Resource> report(String calendar) throws IOException;
     }
     private final Store store; private final Transport transport;
@@ -30,8 +30,8 @@ public final class SyncEngine {
     public SyncEngine(Store store,Transport transport) { this.store=store;this.transport=transport; }
     public SyncEngine(Store store,DavClient client) {
         this(store,new Transport() {
-            public DavClient.Resource put(String h,String e,String b) throws IOException { return client.put(h,e,b); }
-            public void delete(String h,String e) throws IOException { client.delete(h,e); }
+            public DavClient.Resource put(String c,String h,String e,String b) throws IOException { return client.put(c,h,e,b); }
+            public void delete(String c,String h,String e) throws IOException { client.delete(c,h,e); }
             public List<DavClient.Resource> report(String c) throws IOException { return client.report(c); }
         });
     }
@@ -41,10 +41,11 @@ public final class SyncEngine {
         for(Operation op:store.pending(calendar)) {
             if(op.conflict) { error="CONFLICT"; continue; }
             try {
+                if(!op.calendar.equals(calendar)) throw new IllegalArgumentException("Foreign operation calendar");
                 store.markAttempted(op.id);
                 DavClient.Resource resource=null;
-                if(op.kind.equals("DELETE")) transport.delete(op.href,op.etag);
-                else if(op.kind.equals("PUT")) resource=transport.put(op.href,op.etag,op.ics);
+                if(op.kind.equals("DELETE")) transport.delete(calendar,op.href,op.etag);
+                else if(op.kind.equals("PUT")) resource=transport.put(calendar,op.href,op.etag,op.ics);
                 else throw new IllegalArgumentException("Unknown operation");
                 store.acknowledge(op,resource);
             } catch(DavClient.ConflictException ex) { store.fail(op.id,"CONFLICT");error="CONFLICT"; }

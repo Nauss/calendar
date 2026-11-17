@@ -1,0 +1,24 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="16dp" android:background="@drawable/widget_surface_light">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_month" android:textColor="#1F1F1F" android:textSize="20sp" android:textStyle="bold"/>
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="8dp" android:text="@string/widget_preview_label" android:textColor="#444746" android:textSize="12sp"/>
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="16dp" android:text="@string/widget_preview_month" android:textColor="#1F1F1F" android:gravity="center" android:textSize="18sp"/>
+    <!-- Representative static preview; the live widget uses independent clickable day cells. -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay" android:text="1"/>
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <TextView style="@style/WidgetPreviewDay" android:text="2"/><TextView style="@style/WidgetPreviewDay" android:text="3"/><TextView style="@style/WidgetPreviewDay" android:text="4"/><TextView style="@style/WidgetPreviewDay" android:text="5"/><TextView style="@style/WidgetPreviewDay" android:text="6"/><TextView style="@style/WidgetPreviewDay" android:text="7"/><TextView style="@style/WidgetPreviewDay" android:text="8"/>
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <TextView style="@style/WidgetPreviewDay" android:text="9"/><TextView style="@style/WidgetPreviewDay" android:text="10"/><TextView style="@style/WidgetPreviewDay" android:text="11"/><TextView style="@style/WidgetPreviewDay" android:text="12"/><TextView style="@style/WidgetPreviewDay" android:text="13"/><TextView style="@style/WidgetPreviewDay" android:text="14"/><TextView style="@style/WidgetPreviewDay" android:text="15"/>
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <TextView style="@style/WidgetPreviewDay" android:text="16"/><TextView style="@style/WidgetPreviewDay" android:text="17" android:background="@drawable/widget_today_light" android:textColor="#FFFFFF"/><TextView style="@style/WidgetPreviewDay" android:text="18"/><TextView style="@style/WidgetPreviewDay" android:text="19"/><TextView style="@style/WidgetPreviewDay" android:text="20"/><TextView style="@style/WidgetPreviewDay" android:text="21"/><TextView style="@style/WidgetPreviewDay" android:text="22"/>
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <TextView style="@style/WidgetPreviewDay" android:text="23"/><TextView style="@style/WidgetPreviewDay" android:text="24"/><TextView style="@style/WidgetPreviewDay" android:text="25"/><TextView style="@style/WidgetPreviewDay" android:text="26"/><TextView style="@style/WidgetPreviewDay" android:text="27"/><TextView style="@style/WidgetPreviewDay" android:text="28"/><TextView style="@style/WidgetPreviewDay" android:text="29"/>
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <TextView style="@style/WidgetPreviewDay" android:text="30"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/><TextView style="@style/WidgetPreviewDay"/>
+    </LinearLayout>
+</LinearLayout>

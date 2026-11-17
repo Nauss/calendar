@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Explicit developer launch only, no launcher entry and never merged into release. -->
+        <activity android:name=".WidgetHostActivity" android:exported="true" android:label="@string/widget_host_title"/>
+    </application>
+</manifest>

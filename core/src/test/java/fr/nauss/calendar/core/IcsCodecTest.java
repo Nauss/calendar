@@ -19,7 +19,7 @@ public class IcsCodecTest {
         var x = IcsCodec.expand(base, LocalDate.of(2026,11,1),LocalDate.of(2026,11,6),UTC);
         assertEquals(3,x.size()); assertEquals("Moved",x.get(1).title);
         assertEquals(Instant.parse("2026-11-03T11:00:00Z"),x.get(1).start);
-        assertFalse(IcsCodec.inspect(base,UTC).editable);
+        assertTrue(IcsCodec.inspect(base,UTC).editable);assertFalse(IcsCodec.inspect(base,UTC).timeEditable);
     }
     @Test public void floatingTimeUsesDisplayZone() {
         var x = IcsCodec.expand(ics("DTSTART:20261101T090000\r\nDTEND:20261101T100000"),LocalDate.of(2026,11,1),LocalDate.of(2026,11,2),ZoneId.of("Europe/Paris"));
@@ -37,12 +37,12 @@ public class IcsCodecTest {
         assertEquals("fixture-1", IcsCodec.inspect(edited,UTC).uid);
         assertEquals("Changed",IcsCodec.inspect(edited,UTC).draft.title);
     }
-    @Test public void meetingAndComplexSeriesCannotBeEdited() {
+    @Test public void meetingBlockedAndComplexSeriesAllowsOnlyPreservableFields() {
         String a=ics("DTSTART:20261101T090000Z\r\nORGANIZER:mailto:someone@example.invalid\r\nSUMMARY:Meeting");
         assertFalse(IcsCodec.inspect(a,UTC).editable);
         assertThrows(IllegalArgumentException.class,()->IcsCodec.save(a,new IcsCodec.Draft()));
         String b=ics("DTSTART:20261101T090000Z\r\nRRULE:FREQ=MONTHLY;BYDAY=2MO");
-        assertFalse(IcsCodec.inspect(b,UTC).editable);
+        assertTrue(IcsCodec.inspect(b,UTC).editable);assertFalse(IcsCodec.inspect(b,UTC).recurrenceEditable);assertFalse(IcsCodec.inspect(b,UTC).timeEditable);
     }
     @Test public void newRoundTripTimezoneReminderAndEscaping() {
         var d=new IcsCodec.Draft(); d.title="A, B; C\nD"; d.zone="Europe/Paris";

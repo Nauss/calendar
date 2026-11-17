@@ -40,6 +40,19 @@ contacts, location, microphone or camera. An event's location is text you enter,
 not a device-position lookup. Reminders may display event titles on the device;
 Android notification visibility settings also apply.
 
+## Home-screen widgets
+
+Widgets are optional and are placed through your Android launcher. They display
+titles, times, calendar colors and locations from the same private cached events
+as the app, respecting calendar visibility. Anyone who can see your home screen,
+and the launcher hosting the widget, can see that displayed information. Remove
+the widget or hide its calendar in Agenda if that is not appropriate for you.
+
+Widgets do not connect to a separate service or add telemetry. Their click intents
+carry internal event identifiers and dates, not raw calendar files, notes or account
+credentials. A widget can show older cached information while synchronization is
+offline; errors and bounded previews are labelled. Picker previews are illustrative.
+
 ## Other calendar apps
 
 Agenda does not read or write Google Calendar's Android account or the shared

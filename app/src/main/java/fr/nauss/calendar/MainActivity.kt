@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -30,18 +31,46 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 
+data class WidgetLaunch(val serial: Long,val route: WidgetRoute)
+private data class IncomingNavigation(val token: String,val eventId: String?,val widget: WidgetRoute?) {
+    companion object {
+        val saver=Saver<IncomingNavigation?,ArrayList<String>>(
+            save={ request -> request?.let { arrayListOf(it.token,it.eventId ?: "",it.widget?.kind?.name ?: "",it.widget?.date?.toString() ?: "",it.widget?.id ?: "",it.widget?.start?.toString() ?: "",it.widget?.occurrence ?: "") } },
+            restore={ fields -> IncomingNavigation(fields[0],fields[1].ifEmpty { null },fields[2].ifEmpty { null }?.let {
+                WidgetRoute(RouteKind.valueOf(it),fields[3].ifEmpty { null }?.let(LocalDate::parse),fields[4].ifEmpty { null },fields[5].ifEmpty { null }?.let(Instant::parse),fields[6].ifEmpty { null })
+            }) }
+        )
+    }
+}
 class MainActivity : ComponentActivity() {
     private var requestedEvent by mutableStateOf<String?>(null)
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState);enableEdgeToEdge();requestedEvent=intent.getStringExtra("event_id")
-        setContent { AgendaRoot(requestedEvent,consumeEvent={ requestedEvent=null }) }
+    private var widgetLaunch by mutableStateOf<WidgetLaunch?>(null)
+    private var launchSerial=0L
+    private fun receive(intent: Intent) {
+        requestedEvent=intent.getStringExtra("event_id")
+        widgetLaunch=WidgetIntents.read(intent)?.let { WidgetLaunch(++launchSerial,it) }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent);setIntent(intent);requestedEvent=intent.getStringExtra("event_id") }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState);enableEdgeToEdge()
+        if(savedInstanceState==null) receive(intent) else {
+            requestedEvent=savedInstanceState.getString("agenda.pendingEvent")
+            if(savedInstanceState.getBoolean("agenda.pendingWidget")) widgetLaunch=WidgetIntents.read(intent)?.let { WidgetLaunch(++launchSerial,it) }
+        }
+        setContent { AgendaRoot(requestedEvent,consumeEvent={ requestedEvent=null },widgetLaunch=widgetLaunch,consumeWidget={ widgetLaunch=null }) }
+    }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent);setIntent(intent);receive(intent) }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("agenda.pendingEvent",requestedEvent)
+        outState.putBoolean("agenda.pendingWidget",widgetLaunch!=null)
+        super.onSaveInstanceState(outState)
+    }
 }
 
 @Composable fun calendarName(c: CalendarRow): String = when {
@@ -57,15 +86,28 @@ fun nativeDate(context: android.content.Context,date: LocalDate,selected: (Local
     DatePickerDialog(context,{ _,y,m,d -> selected(LocalDate.of(y,m+1,d)) },date.year,date.monthValue-1,date.dayOfMonth).show()
 }
 
-@Composable fun AgendaRoot(requestedEvent: String?,consumeEvent: ()->Unit,model: CalendarModel=viewModel()) {
+@Composable fun AgendaRoot(requestedEvent: String?,consumeEvent: ()->Unit,model: CalendarModel=viewModel(),widgetLaunch: WidgetLaunch?=null,consumeWidget: ()->Unit={}) {
     val state by model.state.collectAsState(); val context=LocalContext.current;val scope=rememberCoroutineScope()
     var dateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) };val date=LocalDate.parse(dateText)
     var viewName by rememberSaveable { mutableStateOf(model.app.store.meta("view",CalendarView.MONTH.name)) };val view=CalendarView.entries.firstOrNull { it.name==viewName } ?: CalendarView.MONTH
     var route by rememberSaveable { mutableStateOf("home") };var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedOccurrence by remember { mutableStateOf<DisplayEvent?>(null) }
+    val occurrenceSaver=remember(model.app) { Saver<DisplayEvent?,ArrayList<String>>(
+        save={ event -> event?.let { arrayListOf(it.record.id,it.occurrence.start.toString(),it.occurrence.key) } },
+        restore={ fields -> runCatching {
+            val start=Instant.parse(fields[1]);val zone=ZoneId.systemDefault();val db=model.app.store
+            val request=WidgetRoute(RouteKind.EVENT,start.atZone(zone).toLocalDate(),fields[0],start,fields[2])
+            WidgetRoutes.resolve(request,db.event(fields[0])?.let { listOf(it) } ?: emptyList(),db.calendars(),zone).event
+        }.getOrNull() }
+    ) }
+    var selectedOccurrence by rememberSaveable(stateSaver=occurrenceSaver) { mutableStateOf<DisplayEvent?>(null) }
     var editorStart by rememberSaveable { mutableStateOf(LocalDateTime.now().withMinute(0).withSecond(0).withNano(0).toString()) }
+    var editorSession by rememberSaveable { mutableStateOf(java.util.UUID.randomUUID().toString()) }
+    var incoming by rememberSaveable(stateSaver=IncomingNavigation.saver) { mutableStateOf<IncomingNavigation?>(null) }
+    var acceptedNavigation by rememberSaveable { mutableStateOf<String?>(null) }
     var searching by rememberSaveable { mutableStateOf(false) };var query by rememberSaveable { mutableStateOf("") }
     var revision by remember { mutableIntStateOf(0) }
+    var navigationRevision by rememberSaveable { mutableIntStateOf(0) }
+    var unavailableRoute by remember { mutableStateOf(false) }
     val dark=when(state.theme) { "dark" -> true;"light" -> false;else -> isSystemInDarkTheme() }
     val colors=if(dark) darkColorScheme(
         primary=Color(0xFFA8C7FA),onPrimary=Color(0xFF062E6F),primaryContainer=Color(0xFF0842A0),onPrimaryContainer=Color(0xFFD3E3FD),
@@ -89,14 +131,50 @@ fun nativeDate(context: android.content.Context,date: LocalDate,selected: (Local
         }
     }
     LaunchedEffect(date,view,searching,revision) { while(true) { model.load(date,view,searching);delay(4000) } }
-    LaunchedEffect(requestedEvent) { requestedEvent?.let { selectedId=it;selectedOccurrence=null;route="detail";consumeEvent() } }
     fun selectEvent(event: DisplayEvent) { selectedId=event.record.id;selectedOccurrence=event;route="detail" }
-    fun create(start: LocalDateTime) { selectedId=null;selectedOccurrence=null;editorStart=start.toString();route="editor" }
+    fun create(start: LocalDateTime) { selectedId=null;selectedOccurrence=null;editorStart=start.toString();editorSession=java.util.UUID.randomUUID().toString();route="editor" }
+    // Consume the Activity delivery, not the user's draft. The pending request is saved
+    // separately so recreation cannot replay an intent or lose a discard confirmation.
+    LaunchedEffect(requestedEvent,widgetLaunch) {
+        if(requestedEvent!=null || widgetLaunch!=null) {
+            incoming=IncomingNavigation(java.util.UUID.randomUUID().toString(),requestedEvent,widgetLaunch?.route)
+            acceptedNavigation=null
+            consumeEvent();consumeWidget()
+        }
+    }
+    LaunchedEffect(incoming,route,acceptedNavigation) {
+        incoming?.let { request ->
+            if(route=="editor" && acceptedNavigation!=request.token) return@LaunchedEffect
+            val resolved=request.widget?.let { widget -> withContext(Dispatchers.IO) {
+                val db=model.app.store
+                WidgetRoutes.resolve(widget,widget.id?.let { db.event(it) }?.let { listOf(it) } ?: emptyList(),db.calendars(),ZoneId.systemDefault())
+            } }
+            if(incoming!=request) return@LaunchedEffect
+            searching=false;query="";selectedId=null;selectedOccurrence=null;route="home";navigationRevision++
+            if(resolved==null) { selectedId=request.eventId;route="detail" } else {
+            resolved.date?.let { dateText=it.toString() }
+            when(resolved.kind) {
+                RouteKind.EVENT -> resolved.event?.let(::selectEvent)
+                RouteKind.CREATE -> resolved.date?.let { create(it.atTime(9,0)) }
+                RouteKind.DAY -> viewName=CalendarView.DAY.name
+                RouteKind.PLANNING -> viewName=CalendarView.AGENDA.name
+                RouteKind.UNAVAILABLE -> unavailableRoute=true
+            }
+            }
+            incoming=null;acceptedNavigation=null
+        }
+    }
     MaterialTheme(colorScheme=colors) {
+        if(unavailableRoute) AlertDialog(onDismissRequest={unavailableRoute=false},text={Text(stringResource(R.string.widget_route_unavailable))},confirmButton={TextButton(onClick={unavailableRoute=false}) { Text(stringResource(R.string.done)) }})
         Surface(Modifier.fillMaxSize()) {
             when(route) {
-                "editor" -> EventEditor(model.app,state,selectedId,LocalDateTime.parse(editorStart),onBack={route=if(selectedId==null) "home" else "detail"},onSaved={ id -> selectedId=id;selectedOccurrence=null;revision++;route="detail" })
-                "detail" -> EventDetail(model.app,selectedId,selectedOccurrence,onBack={route="home"},onEdit={route="editor"},onChanged={revision++},onDeleted={revision++;route="home"})
+                "editor" -> key(editorSession) {
+                    EventEditor(model.app,state,selectedId,LocalDateTime.parse(editorStart),onBack={route=if(selectedId==null) "home" else "detail"},onSaved={ id -> selectedId=id;selectedOccurrence=null;revision++;route="detail" },
+                        navigationRequest=incoming?.token,navigating=incoming!=null && acceptedNavigation==incoming?.token,
+                        onNavigate={ token -> if(incoming?.token==token && requestedEvent==null && widgetLaunch==null) acceptedNavigation=token },
+                        onCancelNavigation={ token -> if(incoming?.token==token) {incoming=null;acceptedNavigation=null} })
+                }
+                "detail" -> EventDetail(model.app,selectedId,selectedOccurrence,onBack={route="home"},onEdit={editorSession=java.util.UUID.randomUUID().toString();route="editor"},onChanged={revision++},onDeleted={revision++;route="home"})
                 "settings" -> SettingsScreen(model.app,state,onBack={revision++;route="home"},onChanged={revision++},onEvent={selectedId=it;selectedOccurrence=null;route="detail"})
                 else -> {
                     val drawer=rememberDrawerState(DrawerValue.Closed)
@@ -124,13 +202,13 @@ fun nativeDate(context: android.content.Context,date: LocalDate,selected: (Local
                         Scaffold(
                             topBar={ TopAppBar(title={
                                 if(searching) TextField(query,{query=it},placeholder={Text(stringResource(R.string.search_hint))},singleLine=true,modifier=Modifier.fillMaxWidth().testTag("search_input"),colors=TextFieldDefaults.colors(focusedContainerColor=colors.surface,unfocusedContainerColor=colors.surface))
-                                else TextButton(onClick={nativeDate(context,date){dateText=it.toString()}},contentPadding=PaddingValues(horizontal=0.dp)) {
+                                else TextButton(onClick={nativeDate(context,date){dateText=it.toString();navigationRevision++}},contentPadding=PaddingValues(horizontal=0.dp),colors=ButtonDefaults.textButtonColors(contentColor=colors.onSurface)) {
                                     Text(date.format(DateTimeFormatter.ofPattern("LLLL yyyy",Locale.getDefault())).replaceFirstChar { it.titlecase(Locale.getDefault()) },maxLines=1,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.titleLarge)
                                     Icon(Icons.Default.ArrowDropDown,null)
                                 }
                             },navigationIcon={IconButton(onClick={if(searching) {searching=false;query=""} else scope.launch{drawer.open()}},modifier=Modifier.testTag("navigation")){Icon(if(searching) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Menu,stringResource(if(searching) R.string.back else R.string.menu))}},actions={
                                 if(!searching) {
-                                    IconButton(onClick={dateText=LocalDate.now().toString()},modifier=Modifier.testTag("today")) { Icon(Icons.Default.Today,stringResource(R.string.today)) }
+                                    IconButton(onClick={dateText=LocalDate.now().toString();navigationRevision++},modifier=Modifier.testTag("today")) { Icon(Icons.Default.Today,stringResource(R.string.today)) }
                                     IconButton(onClick={searching=true},modifier=Modifier.testTag("search")) { Icon(Icons.Default.Search,stringResource(R.string.search)) }
                                 }
                             }) },
@@ -145,19 +223,21 @@ fun nativeDate(context: android.content.Context,date: LocalDate,selected: (Local
                                 if(state.unsupported.isNotEmpty()) TextButton(onClick={route="settings"}) { Text(stringResource(R.string.parse_error),style=MaterialTheme.typography.bodySmall) }
                                 if(searching) {
                                     Text(stringResource(R.string.search_range),style=MaterialTheme.typography.labelMedium,modifier=Modifier.padding(16.dp,6.dp))
-                                    EventAgenda(state.events.filter { query.isNotBlank() && (it.occurrence.title.contains(query,true) || it.occurrence.location.contains(query,true)) },onEvent=::selectEvent,emptyText=stringResource(R.string.search_empty))
+                                    EventAgenda(state.events.filter { query.isNotBlank() && (it.occurrence.title.contains(query,true) || it.occurrence.location.contains(query,true)) },onEvent=::selectEvent,emptyText=stringResource(R.string.search_empty),from=date.withDayOfYear(1),until=date.withDayOfYear(1).plusYears(1),scrollKey=query)
                                 } else {
+                                    if(view!=CalendarView.AGENDA) {
                                     Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
                                         IconButton(onClick={dateText=when(view) {CalendarView.MONTH->date.minusMonths(1);CalendarView.AGENDA->date.minusDays(7);else->date.minusDays(view.days.toLong())}.toString()}) { Icon(Icons.Default.ChevronLeft,stringResource(R.string.previous)) }
                                         Text(date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)),Modifier.weight(1f),style=MaterialTheme.typography.labelLarge,maxLines=2,overflow=TextOverflow.Ellipsis)
                                         IconButton(onClick={dateText=when(view) {CalendarView.MONTH->date.plusMonths(1);CalendarView.AGENDA->date.plusDays(7);else->date.plusDays(view.days.toLong())}.toString()}) { Icon(Icons.Default.ChevronRight,stringResource(R.string.next)) }
                                     }
                                     HorizontalDivider()
+                                    }
                                     if(state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                                     if(state.calendars.isNotEmpty() && state.calendars.none { it.visible }) Text(stringResource(R.string.hidden_calendars),Modifier.padding(24.dp))
                                     when(view) {
                                         CalendarView.MONTH -> MonthCalendar(date,state.events,{dateText=it.toString()},::selectEvent)
-                                        CalendarView.AGENDA -> EventAgenda(state.events,::selectEvent,stringResource(R.string.empty_agenda))
+                                        CalendarView.AGENDA -> EventAgenda(state.events,::selectEvent,stringResource(R.string.empty_agenda),from=date,until=date.plusDays(view.days.toLong()),scrollKey=date to navigationRevision)
                                         else -> TimedCalendar(firstDay(date,view),view.days,state.events,onDay={dateText=it.toString();viewName=CalendarView.DAY.name},onCreate=::create,onEvent=::selectEvent)
                                     }
                                 }

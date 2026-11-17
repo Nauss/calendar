@@ -17,6 +17,12 @@ class IsolatedAgendaApplication : AgendaApplication() {
     override val vaultAlias="agenda-instrumentation-key"
     override val reminderNamespace="instrumentation"
     override val reminderAlarmsEnabled=false
+    override val productionWidgetsEnabled=false
+    override val widgetNamespace="instrumentation"
+    @Volatile var legacyWidgetCollections=false
+    override val widgetUseLegacyCollections get()=legacyWidgetCollections || android.os.Build.VERSION.SDK_INT<31
+    @Volatile var widgetRenderedHook: ((Int,WidgetSnapshot)->Unit)?=null
+    override fun onWidgetRendered(id: Int,snapshot: WidgetSnapshot) { widgetRenderedHook?.invoke(id,snapshot) }
     @Volatile var notificationHook: (() -> Unit)?=null
     override fun postReminder(id: String,notification: android.app.Notification) { notificationHook?.invoke();super.postReminder(id,notification) }
     override val storageContext: Context by lazy { IsolatedStorage(this) }

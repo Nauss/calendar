@@ -16,8 +16,8 @@ public class SyncEngineTest {
     @Test public void conflictRetainsPendingAndCache() {
         Store store=new Store(); store.pending.add(new SyncEngine.Operation("op","cal","href","\"1\"","raw","PUT",false));
         SyncEngine.Transport transport=new SyncEngine.Transport() {
-            public DavClient.Resource put(String h,String e,String b) throws java.io.IOException { assertTrue(store.attempted); throw new DavClient.ConflictException(); }
-            public void delete(String h,String e) {}
+            public DavClient.Resource put(String c,String h,String e,String b) throws java.io.IOException { assertTrue(store.attempted); throw new DavClient.ConflictException(); }
+            public void delete(String c,String h,String e) {}
             public List<DavClient.Resource> report(String c) throws java.io.IOException { throw new java.io.IOException(); }
         };
         assertFalse(new SyncEngine(store,transport).sync("cal")); assertEquals(1,store.pending.size()); assertFalse(store.applied); assertEquals("CONFLICT",store.failure);
@@ -26,8 +26,8 @@ public class SyncEngineTest {
         Store store=new Store(); var operation=new SyncEngine.Operation("durable-op","cal","same-href",null,"same-body","PUT",false); store.pending.add(operation);
         List<String> seen=new ArrayList<>();
         SyncEngine.Transport t=new SyncEngine.Transport() {
-            public DavClient.Resource put(String h,String e,String b) throws java.io.IOException { seen.add(h+":"+b); if(seen.size()==1) throw new java.io.IOException(); return null; }
-            public void delete(String h,String e) {}
+            public DavClient.Resource put(String c,String h,String e,String b) throws java.io.IOException { seen.add(h+":"+b); if(seen.size()==1) throw new java.io.IOException(); return null; }
+            public void delete(String c,String h,String e) {}
             public List<DavClient.Resource> report(String c) { return List.of(); }
         };
         SyncEngine engine=new SyncEngine(store,t); assertFalse(engine.sync("cal")); assertEquals(1,store.pending.size());
@@ -35,8 +35,8 @@ public class SyncEngineTest {
     }
     @Test public void reportFailureNeverAppliesEmptySnapshot() {
         Store store=new Store(); SyncEngine.Transport t=new SyncEngine.Transport() {
-            public DavClient.Resource put(String h,String e,String b) { throw new AssertionError(); }
-            public void delete(String h,String e) { throw new AssertionError(); }
+            public DavClient.Resource put(String c,String h,String e,String b) { throw new AssertionError(); }
+            public void delete(String c,String h,String e) { throw new AssertionError(); }
             public List<DavClient.Resource> report(String c) throws java.io.IOException { throw new java.io.IOException("partial"); }
         };
         assertFalse(new SyncEngine(store,t).sync("cal")); assertFalse(store.applied);

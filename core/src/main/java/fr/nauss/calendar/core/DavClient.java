@@ -41,6 +41,7 @@ public final class DavClient {
     }
     public static HttpUrl validateEndpoint(String value,boolean localHttp) {
         if(value==null || !value.equals(value.trim()) || value.indexOf('\\')>=0 || !(value.startsWith("https://") || value.startsWith("http://")) || java.net.URI.create(value).getRawUserInfo()!=null) throw new IllegalArgumentException("Invalid endpoint");
+        safeRawPath(value);
         HttpUrl u=HttpUrl.parse(value);
         if(u==null || !u.username().isEmpty() || !u.password().isEmpty() || u.query()!=null || u.fragment()!=null) throw new IllegalArgumentException("Endpoint must not contain credentials, query or fragment");
         // HTTP is limited to literal loopback/RFC1918 addresses. No DNS rebinding or public cleartext.
@@ -49,6 +50,25 @@ public final class DavClient {
     }
     private static void safePath(HttpUrl url) {
         for(String part:url.pathSegments()) if(part.contains("/") || part.contains("\\") || part.contains("%") || part.equals(".") || part.equals("..")) throw new IllegalArgumentException("Ambiguous encoded path rejected");
+    }
+    private static void safeRawPath(String value) {
+        String path=java.net.URI.create(value).getRawPath();
+        if(path==null) throw new IllegalArgumentException("Missing path");
+        for(String segment:path.split("/",-1)) {
+            String dots=segment.replaceAll("(?i)%2e",".");
+            if(dots.equals(".") || dots.equals("..")) throw new IllegalArgumentException("Dot path rejected before normalization");
+        }
+        if(path.contains("//")) throw new IllegalArgumentException("Empty path segment");
+    }
+    /** Exact immediate resource membership; extensions are not a DAV identity boundary. */
+    public static boolean isResourceHref(String collection,String href) {
+        try {
+            HttpUrl c=validateEndpoint(collection,true),u=validateEndpoint(href,true);
+            String path=c.encodedPath(),member=u.encodedPath();
+            return c.scheme().equals(u.scheme()) && c.host().equals(u.host()) && c.port()==u.port()
+                && path.endsWith("/") && member.startsWith(path) && member.length()>path.length()
+                && !member.substring(path.length()).contains("/");
+        } catch(IllegalArgumentException ex) { return false; }
     }
     private static boolean privateLiteral(String host) {
         if(host.equals("::1")) return true;
@@ -60,6 +80,7 @@ public final class DavClient {
     public String endpoint() { return root.toString(); }
     private HttpUrl resolve(String href) {
         if(href==null || href.indexOf('\\')>=0 || href.indexOf('\r')>=0 || href.indexOf('\n')>=0 || java.net.URI.create(href).getRawUserInfo()!=null) throw new IllegalArgumentException("Unsafe href");
+        safeRawPath(href);
         HttpUrl u=root.resolve(href);
         if(u==null || !u.scheme().equals(root.scheme()) || !u.host().equals(root.host()) || u.port()!=root.port()
             || !u.username().isEmpty() || !u.password().isEmpty() || u.query()!=null || u.fragment()!=null) throw new IllegalArgumentException("Foreign or unsafe href rejected");
@@ -70,9 +91,9 @@ public final class DavClient {
         if(!c.encodedPath().endsWith("/") || filename.isEmpty() || filename.contains("/") || filename.contains("\\") || filename.equals(".") || filename.equals("..")) throw new IllegalArgumentException("Invalid resource name");
         return c.newBuilder().addPathSegment(filename).build().toString();
     }
-    private HttpUrl eventUrl(String href) {
-        HttpUrl u=resolve(href);
-        if(u.encodedPath().endsWith("/") || !u.encodedPath().toLowerCase(Locale.ROOT).endsWith(".ics")) throw new IllegalArgumentException("Only .ics event resources can be mutated");
+    private HttpUrl eventUrl(String collection,String href) {
+        HttpUrl c=resolve(collection),u=resolve(href);
+        if(!isResourceHref(c.toString(),u.toString())) throw new IllegalArgumentException("Not a resource in the selected calendar");
         return u;
     }
     private Request.Builder request(HttpUrl url) { return new Request.Builder().url(url).header("Authorization",authorization).header("Accept","application/xml, text/calendar").header("User-Agent","Agenda/0.1").header("Connection","close"); }
@@ -181,8 +202,8 @@ public final class DavClient {
             if(contains(document,DAV,"error") || contains(document,CAL,"limit-recurrence-set")) throw new IOException("Partial report rejected");
             List<Resource> out=new ArrayList<>(); Set<String> hrefs=new HashSet<>(),uids=new HashSet<>();
             for(Element row:children(document,DAV,"response")) {
-                HttpUrl url=resolve(text(row,DAV,"href")); String path=url.encodedPath();
-                if(!path.startsWith(c.encodedPath()) || path.equals(c.encodedPath()) || path.substring(c.encodedPath().length()).contains("/")) throw new IOException("Foreign collection member");
+                HttpUrl url=resolve(text(row,DAV,"href"));
+                if(!isResourceHref(c.toString(),url.toString())) throw new IOException("Foreign collection member");
                 String etag=null,data=null;
                 for(Element ps:children(row,DAV,"propstat")) if(!ok(text(ps,DAV,"status"))) throw new IOException("Partial report rejected");
                 for(Element p:successfulProps(row)) {
@@ -204,16 +225,16 @@ public final class DavClient {
         return true;
     }
     private static void requireEtag(String etag) { if(!strongEtag(etag)) throw new IllegalArgumentException("Strong ETag required for mutation"); }
-    public Resource get(String href) throws IOException {
-        HttpUrl u=eventUrl(href);
+    public Resource get(String collection,String href) throws IOException {
+        HttpUrl u=eventUrl(collection,href);
         try(Response r=http.newCall(request(u).get().build()).execute()) {
             if(r.code()!=200) throw failure(r.code());
             String etag=r.header("ETag"); requireEtag(etag);
             try { return new Resource(u.toString(),etag,body(r)); } catch(IllegalArgumentException ex) { throw new IOException("Invalid resource response"); }
         }
     }
-    public Resource put(String href,String etag,String raw) throws IOException {
-        HttpUrl u=eventUrl(href); IcsCodec.inspect(raw,ZoneOffset.UTC);
+    public Resource put(String collection,String href,String etag,String raw) throws IOException {
+        HttpUrl u=eventUrl(collection,href); IcsCodec.inspect(raw,ZoneOffset.UTC);
         if(etag!=null) requireEtag(etag);
         Request q=request(u).header(etag==null?"If-None-Match":"If-Match",etag==null?"*":etag).put(RequestBody.create(raw,ICS)).build();
         try(Response r=http.newCall(q).execute()) {
@@ -223,15 +244,45 @@ public final class DavClient {
                 if(strongEtag(next)) return new Resource(u.toString(),next,raw);
             }
         }
-        Resource remote=get(u.toString());
+        Resource remote=get(collection,u.toString());
         if(!IcsCodec.equivalent(raw,remote.ics)) {
             // The server may have canonicalized a successful write. Keep pending until user reviews.
             throw new ConflictException();
         }
         return remote;
     }
-    public void delete(String href,String etag) throws IOException {
-        requireEtag(etag); HttpUrl u=eventUrl(href);
+    private void requireNonCollection(HttpUrl url) throws IOException {
+        String payload="<d:propfind xmlns:d='DAV:'><d:prop><d:resourcetype/></d:prop></d:propfind>";
+        try(Response r=http.newCall(request(url).header("Depth","0").method("PROPFIND",RequestBody.create(payload,XML)).build()).execute()) {
+            if(r.code()!=207) throw failure(r.code());
+            Element document=xml(body(r)).getDocumentElement();
+            List<Element> rows=children(document,DAV,"response");
+            if(rows.size()!=1 || contains(document,DAV,"error")) throw new IOException("Unproven resource type");
+            Element row=rows.get(0);
+            if(children(row,DAV,"href").size()!=1 || !url.equals(resolve(text(row,DAV,"href")))) throw new IOException("Resource type identity mismatch");
+            String status=text(row,DAV,"status");
+            if(status!=null && !ok(status)) throw new IOException("Failed resource type response");
+            int types=0;
+            for(Element ps:children(row,DAV,"propstat")) {
+                if(children(ps,DAV,"status").size()!=1 || !ok(text(ps,DAV,"status")) || children(ps,DAV,"prop").size()!=1) throw new IOException("Incomplete resource type response");
+                for(Element type:children(first(ps,DAV,"prop"),DAV,"resourcetype")) {
+                    types++;
+                    // Only an explicit empty DAV resourcetype proves a non-collection.
+                    // Unknown types, nested elements and malformed text all fail closed.
+                    if(!type.getTextContent().trim().isEmpty() || type.getElementsByTagName("*").getLength()!=0) throw new IOException("Not an ordinary event resource");
+                }
+            }
+            if(types!=1) throw new IOException("Missing or ambiguous resource type");
+        }
+    }
+    public void delete(String collection,String href,String etag) throws IOException {
+        requireEtag(etag); HttpUrl u=eventUrl(collection,href);
+        // A collection can export one-event ICS: verify both the revision and DAV type.
+        Resource existing;
+        try { existing=get(collection,href); }
+        catch(DavException ex) { if(ex.status==404 || ex.status==410) return; throw ex; }
+        if(!etag.equals(existing.etag)) throw new ConflictException();
+        requireNonCollection(u);
         try(Response r=http.newCall(request(u).header("If-Match",etag).delete().build()).execute()) {
             if(r.code()!=200 && r.code()!=204 && r.code()!=404 && r.code()!=410) throw failure(r.code());
         }

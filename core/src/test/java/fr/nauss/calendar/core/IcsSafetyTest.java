@@ -20,7 +20,7 @@ public class IcsSafetyTest {
     @Test public void monthlyNthWeekdayAndFloatingExdateUseMatureIterator() {
         String raw=IcsCodecTest.ics("DTSTART:20261109T090000\r\nRRULE:FREQ=MONTHLY;BYDAY=2MO;COUNT=3\r\nEXDATE:20261214T090000");
         var out=IcsCodec.expand(raw,LocalDate.of(2026,11,1),LocalDate.of(2027,2,1),ZoneId.of("Europe/Paris"));
-        assertEquals(2,out.size());assertEquals(Instant.parse("2027-01-11T08:00:00Z"),out.get(1).start);assertFalse(IcsCodec.inspect(raw,ZoneOffset.UTC).editable);
+        assertEquals(2,out.size());assertEquals(Instant.parse("2027-01-11T08:00:00Z"),out.get(1).start);assertTrue(IcsCodec.inspect(raw,ZoneOffset.UTC).editable);assertFalse(IcsCodec.inspect(raw,ZoneOffset.UTC).timeEditable);
     }
     @Test public void titleOnlyEditPreservesFloatingSemanticsAndCustomParameters() {
         String raw=IcsCodecTest.ics("DTSTART:20261101T090000\r\nDTEND:20261101T100000\r\nSUMMARY;X-CUSTOM=keep:Old");

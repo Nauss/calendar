@@ -3,6 +3,7 @@ package fr.nauss.calendar.core;
 import biweekly.ICalendar;
 import biweekly.component.VAlarm;
 import biweekly.component.VEvent;
+import biweekly.component.Observance;
 import biweekly.io.TimezoneAssignment;
 import biweekly.io.text.ICalReader;
 import biweekly.parameter.Related;
@@ -32,8 +33,18 @@ public final class IcsCodec {
         public final Draft draft;
         public final boolean editable;
         public final String protection;
-        Info(String uid, Draft draft, String protection) {
-            this.uid=uid; this.draft=draft; this.protection=protection; editable=protection.isEmpty();
+        public final boolean timeEditable, recurrenceEditable, reminderEditable, timezoneEditable;
+        public final String timeProtection;
+        Info(ICalendar cal, VEvent event, Draft draft) {
+            uid=event.getUid().getValue(); this.draft=draft; protection=protection(cal,event); editable=protection.isEmpty();
+            boolean embedded=!cal.getTimezoneInfo().getComponents().isEmpty();
+            boolean complex=complexRecurrence(cal,event);
+            recurrenceEditable=editable && !complex && !embedded;
+            reminderEditable=editable && (event.getAlarms().isEmpty() || (event.getAlarms().size()==1 && simpleAlarm(event.getAlarms().get(0))));
+            timeProtection=!editable?protection:complex?"RECURRENCE_EXCEPTIONS":embedded && event.getRecurrenceRule()!=null?"EMBEDDED_SERIES"
+                :embedded && !matchingOriginalTimes(cal,event,draft)?"CUSTOM_TIMEZONE":"";
+            timeEditable=timeProtection.isEmpty();
+            timezoneEditable=timeEditable && !embedded;
         }
     }
     public static final class Occurrence {
@@ -49,9 +60,25 @@ public final class IcsCodec {
     }
     private static String text(ValuedProperty<String> p) { return p==null || p.getValue()==null ? "" : p.getValue().replace("\r\n","\n"); }
     private static IllegalArgumentException invalid() { return new IllegalArgumentException("Invalid or unsupported iCalendar resource"); }
+    private static void requireLosslessOffset(String value,biweekly.io.ParseContext context) {
+        // biweekly 0.6.8 drops nonzero UTC-OFFSET seconds on parse/write. Validate
+        // the library's unfolded property value, never scan or unfold raw ICS.
+        if(!value.matches("[+-](?:[01][0-9]|2[0-3])[0-5][0-9](?:00)?"))
+            context.addWarning("Unsupported timezone offset precision or syntax");
+    }
     private static ICalendar parse(String raw, ZoneId zone) {
         if(raw==null || raw.length()>MAX_ICS_CHARS || !raw.trim().endsWith("END:VCALENDAR")) throw invalid();
         try(ICalReader reader=new ICalReader(raw)) {
+            reader.registerScribe(new biweekly.io.scribe.property.TimezoneOffsetFromScribe() {
+                @Override protected TimezoneOffsetFrom _parseText(String value,biweekly.ICalDataType type,biweekly.parameter.ICalParameters parameters,biweekly.io.ParseContext context) {
+                    requireLosslessOffset(value,context);return super._parseText(value,type,parameters,context);
+                }
+            });
+            reader.registerScribe(new biweekly.io.scribe.property.TimezoneOffsetToScribe() {
+                @Override protected TimezoneOffsetTo _parseText(String value,biweekly.ICalDataType type,biweekly.parameter.ICalParameters parameters,biweekly.io.ParseContext context) {
+                    requireLosslessOffset(value,context);return super._parseText(value,type,parameters,context);
+                }
+            });
             reader.setDefaultTimezone(TimeZone.getTimeZone(zone));
             ICalendar cal=reader.readNext();
             // 37 is the well-understood IANA TZID without a leading slash; nothing was lost.
@@ -107,16 +134,99 @@ public final class IcsCodec {
         return local.toInstant().plusSeconds(seconds);
     }
     private static String protection(ICalendar cal,VEvent e) {
-        if(cal.getEvents().size()!=1 || e.getRecurrenceId()!=null || !e.getExceptionDates().isEmpty() || !e.getRecurrenceDates().isEmpty() || !e.getProperties(ExceptionRule.class).isEmpty()) return "RECURRENCE_EXCEPTIONS";
-        if(e.getOrganizer()!=null || !e.getAttendees().isEmpty() || cal.getMethod()!=null) return "MEETING";
+        if(cal.getMethod()!=null || cal.getEvents().stream().anyMatch(v->v.getOrganizer()!=null || !v.getAttendees().isEmpty())) return "MEETING";
         if(!cal.getTodos().isEmpty() || !cal.getJournals().isEmpty() || !cal.getFreeBusies().isEmpty() || !cal.getExperimentalComponents().isEmpty() || !e.getExperimentalComponents().isEmpty()) return "COMPLEX_COMPONENT";
-        if(e.getProperties(RecurrenceRule.class).size()>1) return "COMPLEX_RECURRENCE";
-        if(e.getRecurrenceRule()!=null && !simple(e.getRecurrenceRule().getValue())) return "COMPLEX_RECURRENCE";
-        if(e.getAlarms().size()>1 || (!e.getAlarms().isEmpty() && !simpleAlarm(e.getAlarms().get(0)))) return "COMPLEX_REMINDER";
         if(e.getDateStart()==null) return "CANCELLED";
-        TimezoneAssignment a=cal.getTimezoneInfo().getTimezone(e.getDateStart());
-        if(a!=null && a.getComponent()!=null) return "CUSTOM_TIMEZONE";
         return "";
+    }
+    private static boolean complexRecurrence(ICalendar cal,VEvent e) {
+        return cal.getEvents().size()!=1 || e.getRecurrenceId()!=null || !e.getExceptionDates().isEmpty() || !e.getRecurrenceDates().isEmpty()
+            || !e.getProperties(ExceptionRule.class).isEmpty() || e.getProperties(RecurrenceRule.class).size()>1
+            || (e.getRecurrenceRule()!=null && !simple(e.getRecurrenceRule().getValue()));
+    }
+    private static LocalDateTime localTime(Instant instant,TimeZone zone) {
+        Calendar c=Calendar.getInstance(zone);c.setTimeInMillis(instant.toEpochMilli());
+        return LocalDateTime.of(c.get(Calendar.YEAR),c.get(Calendar.MONTH)+1,c.get(Calendar.DAY_OF_MONTH),c.get(Calendar.HOUR_OF_DAY),c.get(Calendar.MINUTE),c.get(Calendar.SECOND));
+    }
+    // A TZID is only a label. Validate actual assignments at original AND requested instants.
+    // This proves one-off endpoints, never equivalence of historical/future recurrence rules.
+    private static boolean matchingOriginalTimes(ICalendar cal,VEvent e,Draft d) {
+        if(d.allDay || d.floating || e.getDateEnd()==null || e.getDuration()!=null) return false;
+        ZoneId zone=ZoneId.of(d.zone);
+        for(DateOrDateTimeProperty p:List.of(e.getDateStart(),e.getDateEnd())) {
+            TimeZone assigned=timeZone(cal,p,zone);
+            if(!assigned.getID().equals(d.zone) || !localTime(p.getValue().toInstant(),assigned).equals(p.getValue().toInstant().atZone(zone).toLocalDateTime())) return false;
+        }
+        return true;
+    }
+    private static Date assignedDate(ICalendar cal,DateOrDateTimeProperty property,LocalDateTime target,ZoneId zone) {
+        TimeZone assigned=timeZone(cal,property,zone);
+        // Preserve an unchanged ambiguous endpoint's original choice of offset.
+        if(localTime(property.getValue().toInstant(),assigned).equals(target)) return new Date(property.getValue().getTime());
+        if(zone.getRules().getValidOffsets(target).size()!=1) throw invalid();
+        Instant instant=target.atZone(zone).toInstant();
+        if(!localTime(instant,assigned).equals(target)) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+        TimezoneAssignment assignment=cal.getTimezoneInfo().getTimezone(property);
+        if(assignment!=null && !instant.equals(uniqueAssignedInstant(assignment,target))) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+        return Date.from(instant);
+    }
+    // Enumerate finite offsets from parsed rules, not guessed hour/minute samples.
+    // Keep millisecond precision, including supported historical offset seconds.
+    static Instant uniqueAssignedInstant(TimezoneAssignment assignment,LocalDateTime target) {
+        var component=assignment.getComponent();
+        if(component==null) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+        List<Observance> observances=new ArrayList<>(component.getStandardTimes());
+        observances.addAll(component.getDaylightSavingsTime());
+        if(observances.isEmpty()) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+        TimeZone assigned=assignment.getTimeZone();
+        Set<Long> offsets=new HashSet<>();offsets.add((long)assigned.getRawOffset());
+        for(Observance observance:observances) {
+            if(observance.getProperties(TimezoneOffsetFrom.class).size()!=1 || observance.getProperties(TimezoneOffsetTo.class).size()!=1
+                || observance.getTimezoneOffsetFrom()==null || observance.getTimezoneOffsetFrom().getValue()==null
+                || observance.getTimezoneOffsetTo()==null || observance.getTimezoneOffsetTo().getValue()==null) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+            offsets.add(observance.getTimezoneOffsetFrom().getValue().getMillis());
+            offsets.add(observance.getTimezoneOffsetTo().getValue().getMillis());
+        }
+        // ICalTimeZone's inherited getOffset(long) is not an inverse of retained
+        // observance wall times. Expand those transitions with biweekly's recurrence
+        // engine in each observance's fixed FROM offset; never parse RRULE ourselves.
+        Instant latest=target.toInstant(ZoneOffset.UTC).minusMillis(Collections.min(offsets));
+        NavigableMap<Instant,Long> transitions=new TreeMap<>();int steps=0;
+        for(Observance observance:observances) {
+            if(observance.getProperties(DateStart.class).size()!=1 || observance.getDateStart()==null || observance.getDateStart().getValue()==null
+                || !observance.getDateStart().getValue().hasTime() || observance.getDateStart().getValue().getRawComponents()==null
+                || !observance.getRecurrenceDates().isEmpty() || !observance.getExceptionDates().isEmpty()
+                || !observance.getProperties(ExceptionRule.class).isEmpty() || observance.getProperties(RecurrenceRule.class).size()>1) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+            if(observance.getRecurrenceRule()!=null) {
+                Recurrence rule=observance.getRecurrenceRule().getValue();
+                if(rule==null || !Set.of(Frequency.YEARLY,Frequency.MONTHLY,Frequency.WEEKLY,Frequency.DAILY).contains(rule.getFrequency())
+                    || !rule.getXRules().isEmpty() || rule.getByHour().size()>24 || rule.getByMinute().size()>1 || rule.getBySecond().size()>1) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+            }
+            long from=observance.getTimezoneOffsetFrom().getValue().getMillis(),to=observance.getTimezoneOffsetTo().getValue().getMillis();
+            Observance copy=observance.copy();
+            Instant wall=biweekly.util.Google2445Utils.convertUtc(biweekly.util.Google2445Utils.convertFromRawComponents(observance.getDateStart().getValue())).toInstant();
+            copy.setDateStart(new ICalDate(Date.from(wall.minusMillis(from)),true));
+            var iterator=biweekly.util.Google2445Utils.getDateIterator(copy,new SimpleTimeZone(Math.toIntExact(from),"observance-offset"));
+            while(iterator.hasNext()) {
+                if(++steps>20000) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+                Instant transition=iterator.next().toInstant();
+                if(transition.isAfter(latest)) break;
+                Long previous=transitions.putIfAbsent(transition,to);
+                if(previous!=null && previous!=to) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+            }
+        }
+        Instant unique=null;
+        for(long offset:offsets) {
+            Instant candidate=target.toInstant(ZoneOffset.UTC).minusMillis(offset);
+            var active=transitions.floorEntry(candidate);
+            // No proven preceding observance: do not invent a prehistory offset.
+            if(active==null) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+            if(active.getValue()!=offset) continue;
+            if(unique!=null) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+            unique=candidate;
+        }
+        if(unique==null || !localTime(unique,assigned).equals(target)) throw new IllegalArgumentException("CUSTOM_TIMEZONE");
+        return unique;
     }
     private static boolean simple(Recurrence r) {
         return r!=null && Set.of(Frequency.DAILY,Frequency.WEEKLY,Frequency.MONTHLY,Frequency.YEARLY).contains(r.getFrequency())
@@ -145,17 +255,17 @@ public final class IcsCodec {
             TimeZone tz=timeZone(cal,e.getDateStart(),zone);
             try { d.zone=tz.toZoneId().getId(); } catch(Exception ex) { d.zone=zone.getId(); }
             Instant start=instant(e.getDateStart(),zone);
-            d.start=d.allDay?rawDay(e.getDateStart().getValue()).atStartOfDay():start.atZone(ZoneId.of(d.zone)).toLocalDateTime();
-            d.end=eventEnd(cal,e,start,zone).atZone(d.allDay?zone:ZoneId.of(d.zone)).toLocalDateTime();
+            d.start=d.allDay?rawDay(e.getDateStart().getValue()).atStartOfDay():localTime(start,tz);
+            d.end=d.allDay?eventEnd(cal,e,start,zone).atZone(zone).toLocalDateTime():localTime(eventEnd(cal,e,start,zone),tz);
         }
         d.repeat=e.getRecurrenceRule()==null?"NONE":e.getRecurrenceRule().getValue().getFrequency().name();
         d.reminderMinutes=reminder(e);
-        return new Info(e.getUid().getValue(),d,protection(cal,e));
+        return new Info(cal,e,d);
     }
     public static String save(String original, Draft d) {
         ZoneId zone=ZoneId.of(d.zone);
-        if(d.title==null || d.title.trim().isEmpty() || d.title.length()>1000 || d.location.length()>4000 || d.notes.length()>100000 || !d.end.isAfter(d.start)
-            || d.reminderMinutes < -1 || d.reminderMinutes>10080 || !Set.of("NONE","DAILY","WEEKLY","MONTHLY","YEARLY").contains(d.repeat)) throw invalid();
+        if(d.title==null || d.title.length()>1000 || d.location.length()>4000 || d.notes.length()>100000
+            || d.reminderMinutes < -1 || d.reminderMinutes>10080) throw invalid();
         ICalendar cal; VEvent e;
         if(original==null) {
             cal=new ICalendar(); cal.setProductId("-//Agenda//Calendar 0.1//EN"); e=new VEvent(); e.setUid(UUID.randomUUID()+"@agenda.local"); cal.addEvent(e);
@@ -164,17 +274,32 @@ public final class IcsCodec {
         }
         boolean wasFloating=original!=null && cal.getTimezoneInfo().isFloating(e.getDateStart());
         if(wasFloating && !d.floating && !d.allDay) throw new IllegalArgumentException("Floating semantics must be preserved");
-        Draft old=original==null?null:inspect(original,zone).draft;
+        Info info=original==null?null:inspect(original,zone);
+        Draft old=info==null?null:info.draft;
         boolean preserveTiming=old!=null && old.start.equals(d.start) && old.end.equals(d.end)
             && old.zone.equals(d.zone) && old.allDay==d.allDay && old.floating==d.floating;
+        boolean changeRepeat=old==null || !old.repeat.equals(d.repeat);
+        boolean changeReminder=old==null || old.reminderMinutes!=d.reminderMinutes;
+        if(d.title.trim().isEmpty() && (old==null || !old.title.equals(d.title))) throw invalid();
+        if(!preserveTiming && (!d.end.isAfter(d.start) || (info!=null && !info.timeEditable))) throw invalid();
+        if(changeRepeat && ((info!=null && !info.recurrenceEditable) || !Set.of("NONE","DAILY","WEEKLY","MONTHLY","YEARLY").contains(d.repeat))) throw invalid();
+        if(changeReminder && info!=null && !info.reminderEditable) throw invalid();
+        boolean embedded=!cal.getTimezoneInfo().getComponents().isEmpty();
+        if(!preserveTiming && embedded && (!old.zone.equals(d.zone) || old.allDay!=d.allDay || old.floating!=d.floating)) throw invalid();
         var startParameters=e.getDateStart()==null?null:new biweekly.parameter.ICalParameters(e.getDateStart().getParameters());
         var endParameters=e.getDateEnd()==null?null:new biweekly.parameter.ICalParameters(e.getDateEnd().getParameters());
-        if(e.getSummary()==null) e.setSummary(d.title.trim()); else e.getSummary().setValue(d.title.trim());
-        if(e.getLocation()==null) e.setLocation(d.location); else e.getLocation().setValue(d.location);
-        if(e.getDescription()==null) e.setDescription(d.notes); else e.getDescription().setValue(d.notes);
-        e.setDateTimeStamp(new Date()); e.setLastModified(new Date());
-        e.setSequence(e.getSequence()==null ? 0 : e.getSequence().getValue()+1);
+        if(old==null || !old.title.equals(d.title)) { if(e.getSummary()==null) e.setSummary(d.title.trim()); else e.getSummary().setValue(d.title.trim()); }
+        if(old==null || !old.location.equals(d.location)) { if(e.getLocation()==null) e.setLocation(d.location); else e.getLocation().setValue(d.location); }
+        if(old==null || !old.notes.equals(d.notes)) { if(e.getDescription()==null) e.setDescription(d.notes); else e.getDescription().setValue(d.notes); }
+        if(e.getDateTimeStamp()==null) e.setDateTimeStamp(new Date()); else e.getDateTimeStamp().setValue(new Date());
+        if(e.getLastModified()==null) e.setLastModified(new Date()); else e.getLastModified().setValue(new Date());
+        if(e.getSequence()==null) e.setSequence(0); else e.getSequence().setValue(e.getSequence().getValue()+1);
         if(!preserveTiming) {
+        if(embedded) {
+            Date start=assignedDate(cal,e.getDateStart(),d.start,zone),end=assignedDate(cal,e.getDateEnd(),d.end,zone);
+            if(!end.after(start)) throw invalid();
+            e.getDateStart().setValue(start,true);e.getDateEnd().setValue(end,true);
+        } else {
         e.removeProperties(DurationProperty.class);
         if(d.allDay) {
             if(!d.end.toLocalDate().isAfter(d.start.toLocalDate())) throw invalid();
@@ -185,7 +310,7 @@ public final class IcsCodec {
             cal.getTimezoneInfo().setFloating(e.getDateStart(),true);cal.getTimezoneInfo().setFloating(e.getDateEnd(),true);
         } else {
             // Reject a local time in a DST gap rather than silently moving the appointment.
-            if(zone.getRules().getValidOffsets(d.start).isEmpty() || zone.getRules().getValidOffsets(d.end).isEmpty()) throw invalid();
+            if(zone.getRules().getValidOffsets(d.start).size()!=1 || zone.getRules().getValidOffsets(d.end).size()!=1) throw invalid();
             e.setDateStart(Date.from(d.start.atZone(zone).toInstant())); e.setDateEnd(Date.from(d.end.atZone(zone).toInstant()));
             var assignment=new TimezoneAssignment(TimeZone.getTimeZone(zone),zone.getId());
             cal.getTimezoneInfo().setTimezone(e.getDateStart(),assignment); cal.getTimezoneInfo().setTimezone(e.getDateEnd(),assignment);
@@ -193,14 +318,19 @@ public final class IcsCodec {
         if(startParameters!=null) { startParameters.setTimezoneId(null);e.getDateStart().setParameters(startParameters); }
         if(endParameters!=null) { endParameters.setTimezoneId(null);e.getDateEnd().setParameters(endParameters); }
         }
+        }
+        if(changeRepeat) {
         if(d.repeat.equals("NONE")) e.removeProperties(RecurrenceRule.class);
         else if(e.getRecurrenceRule()==null) e.setRecurrenceRule(new Recurrence.Builder(Frequency.valueOf(d.repeat)).build());
         else e.getRecurrenceRule().setValue(new Recurrence.Builder(Frequency.valueOf(d.repeat)).build());
+        }
+        if(changeReminder) {
         if(d.reminderMinutes<0) e.removeComponents(VAlarm.class);
         else if(e.getAlarms().isEmpty()) e.addAlarm(VAlarm.display(new Trigger(biweekly.util.Duration.fromMillis(-d.reminderMinutes*60000L),Related.START),d.title));
         else if(reminder(e)!=d.reminderMinutes) {
             VAlarm a=e.getAlarms().get(0);Trigger trigger=new Trigger(biweekly.util.Duration.fromMillis(-d.reminderMinutes*60000L),Related.START);
             trigger.setParameters(new biweekly.parameter.ICalParameters(a.getTrigger().getParameters()));a.setTrigger(trigger);
+        }
         }
         return cal.write();
     }

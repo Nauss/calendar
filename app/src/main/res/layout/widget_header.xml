@@ -1,0 +1,5 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+    <TextView android:id="@+id/widget_title" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:minHeight="48dp" android:gravity="center_vertical" android:text="@string/widget_planning" android:textSize="18sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end"/>
+    <ImageButton android:id="@+id/widget_refresh" android:layout_width="48dp" android:layout_height="48dp" android:background="@android:color/transparent" android:src="@drawable/widget_refresh" android:padding="12dp" android:contentDescription="@string/widget_refresh"/>
+    <ImageButton android:id="@+id/widget_create" android:layout_width="48dp" android:layout_height="48dp" android:background="@android:color/transparent" android:src="@drawable/widget_add" android:padding="12dp" android:contentDescription="@string/new_event"/>
+</LinearLayout>

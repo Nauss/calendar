@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widgets">Widgets</string>
+    <string name="widget_planning">Agenda · Planning</string>
+    <string name="widget_month">Agenda · Mois</string>
+    <string name="widget_planning_description">Les 31 prochains jours des calendriers visibles enregistrés sur cet appareil.</string>
+    <string name="widget_month_description">Un mois avec les repères des événements. Chaque widget conserve son propre mois.</string>
+    <string name="widget_pin_planning">Ajouter le widget Planning</string>
+    <string name="widget_pin_month">Ajouter le widget Mois</string>
+    <string name="widget_pin_hint">Le lanceur contrôle le placement et peut demander votre confirmation.</string>
+    <string name="widget_pin_requested">Demande transmise au lanceur. Confirmez le placement dans celui-ci.</string>
+    <string name="widget_pin_manual">Appuyez longuement sur une zone vide de votre écran d’accueil, puis choisissez Widgets → Agenda.</string>
+    <string name="widget_loading">Chargement des calendriers enregistrés…</string>
+    <string name="widget_empty">Aucun événement dans les 31 prochains jours</string>
+    <string name="widget_error">Certains événements ne peuvent pas être affichés. Ouvrez Agenda pour les vérifier.</string>
+    <string name="widget_more">Aperçu limité · tous les événements dans Agenda</string>
+    <string name="widget_open">Ouvrir Agenda</string>
+    <string name="widget_refresh">Actualiser les calendriers enregistrés</string>
+    <string name="widget_preview_label">Aperçu illustratif · aucun événement réel</string>
+    <string name="widget_preview_title">Exemple de rendez-vous</string>
+    <string name="widget_preview_time">09:00–10:00</string>
+    <string name="widget_preview_day">mar. 17</string>
+    <string name="widget_preview_month">Novembre 2026</string>
+    <string name="widget_cache_hint">Calendriers enregistrés · 31 prochains jours</string>
+    <string name="widget_has_events">%1$s · événements</string>
+    <string name="widget_route_unavailable">Cet événement n’est plus disponible, a été déplacé ou son calendrier est masqué.</string>
+    <string name="event_day_part">Jour %1$d sur %2$d</string>
+    <string name="widget_host_title">Hôte de widgets de test · cache enregistré uniquement</string>
+    <string name="widget_host_bind">Autoriser cet hôte de test à afficher les widgets</string>
+    <string name="widget_host_resize">Redimensionner les widgets</string>
+    <string name="widget_host_clear">Retirer les widgets de cet hôte</string>
+</resources>

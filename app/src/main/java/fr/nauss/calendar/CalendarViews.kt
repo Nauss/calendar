@@ -4,6 +4,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -48,23 +49,49 @@ fun DisplayEvent.touches(day: LocalDate): Boolean {
 }
 @Composable fun EventLine(event: DisplayEvent,onClick: ()->Unit) {
     val o=event.occurrence;val time=occurrenceTime(event)
-    Row(Modifier.fillMaxWidth().heightIn(min=72.dp).clickable(onClick=onClick).padding(horizontal=16.dp,vertical=12.dp).testTag("event_${event.record.id}"),verticalAlignment=Alignment.Top) {
-        Box(Modifier.width(4.dp).height(44.dp).clip(RoundedCornerShape(3.dp)).background(calendarColor(event.calendar.color)))
-        Column(Modifier.weight(1f).padding(start=14.dp)) {
-            Text(o.title.ifBlank { stringResource(R.string.untitled) },style=MaterialTheme.typography.titleMedium)
-            Text(time,style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            if(o.location.isNotBlank()) Text(o.location,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            if(event.record.pending) Text(stringResource(if(event.record.error=="CONFLICT") R.string.conflict else R.string.pending,1),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
-        }
+    val base=calendarColor(event.calendar.color);val foreground=calendarEventTextColor(base)
+    Column(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=4.dp).clip(RoundedCornerShape(12.dp)).background(base).clickable(onClick=onClick).heightIn(min=48.dp).padding(horizontal=14.dp,vertical=10.dp).testTag("event_${event.record.id}")) {
+        Text(o.title.ifBlank { stringResource(R.string.untitled) },style=MaterialTheme.typography.titleMedium,color=foreground)
+        Text(time,style=MaterialTheme.typography.bodyMedium,color=foreground)
+        if(o.location.isNotBlank()) Text(o.location,style=MaterialTheme.typography.bodySmall,color=foreground)
+        if(event.record.pending) Text(stringResource(if(event.record.error=="CONFLICT") R.string.conflict else R.string.pending,1),style=MaterialTheme.typography.labelSmall,color=foreground)
     }
 }
-@Composable fun EventAgenda(events: List<DisplayEvent>,onEvent: (DisplayEvent)->Unit,emptyText: String) {
-    val zone=ZoneId.systemDefault()
-    LazyColumn(Modifier.fillMaxSize().testTag("agenda_list"),contentPadding=PaddingValues(bottom=96.dp)) {
-        if(events.isEmpty()) item { EmptyCalendar(emptyText) }
-        events.groupBy { it.occurrence.start.atZone(zone).toLocalDate() }.forEach { (day,list) ->
-            item("date-$day") { Text(day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)),Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp,12.dp),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.primary) }
-            items(list,key={it.key}) { event -> EventLine(event){onEvent(event)}; HorizontalDivider(Modifier.padding(start=34.dp)) }
+@Composable private fun PlanningCard(row: AgendaRow,onEvent: (DisplayEvent)->Unit) {
+    val event=row.event;val base=calendarColor(event.calendar.color);val foreground=calendarEventTextColor(base)
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(base).clickable { onEvent(event) }.heightIn(min=48.dp).padding(horizontal=14.dp,vertical=10.dp).testTag("event_${event.record.id}")) {
+        Text(event.occurrence.title.ifBlank { stringResource(R.string.untitled) },style=MaterialTheme.typography.titleMedium,color=foreground)
+        Text(occurrenceTime(event),style=MaterialTheme.typography.bodyMedium,color=foreground)
+        if(row.dayCount>1) Text(stringResource(R.string.event_day_part,row.dayIndex,row.dayCount),style=MaterialTheme.typography.labelMedium,color=foreground)
+        if(event.occurrence.location.isNotBlank()) Text(event.occurrence.location,style=MaterialTheme.typography.bodySmall,color=foreground)
+        if(event.record.pending) Text(stringResource(if(event.record.error=="CONFLICT") R.string.conflict else R.string.pending,1),style=MaterialTheme.typography.labelSmall,color=foreground)
+    }
+}
+@Composable fun EventAgenda(events: List<DisplayEvent>,onEvent: (DisplayEvent)->Unit,emptyText: String,
+                           from: LocalDate?=null,until: LocalDate?=null,scrollKey: Any?=null) {
+    val zone=ZoneId.systemDefault();val today=LocalDate.now();val listState=rememberLazyListState()
+    val first=from ?: events.minOfOrNull { it.occurrence.start.atZone(zone).toLocalDate() } ?: today
+    val end=until ?: events.maxOfOrNull { it.occurrence.end.atZone(zone).toLocalDate().plusDays(1) } ?: first.plusDays(1)
+    val rows=remember(events,first,end,zone) { agendaRows(events,first,end,zone) }
+    LaunchedEffect(scrollKey) { listState.scrollToItem(0) }
+    LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow).testTag("agenda_list"),state=listState,contentPadding=PaddingValues(start=8.dp,end=16.dp,top=12.dp,bottom=100.dp)) {
+        if(rows.isEmpty()) item { EmptyCalendar(emptyText) }
+        rows.groupBy { it.day }.forEach { (day,list) ->
+            items(list,key={it.key}) { row ->
+                val firstInDay=row==list.first()
+                Row(Modifier.fillMaxWidth().padding(top=if(firstInDay) 16.dp else 0.dp,bottom=6.dp),verticalAlignment=Alignment.Top) {
+                    Column(Modifier.width(56.dp).padding(top=2.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+                        if(firstInDay) {
+                            Text(day.format(DateTimeFormatter.ofPattern("EEE",Locale.getDefault())),style=MaterialTheme.typography.labelMedium,color=if(day==today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Box(Modifier.sizeIn(minWidth=40.dp,minHeight=40.dp).clip(CircleShape).background(if(day==today) MaterialTheme.colorScheme.primary else Color.Transparent).semantics { contentDescription=day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)) },contentAlignment=Alignment.Center) {
+                                Text(day.dayOfMonth.toString(),style=MaterialTheme.typography.headlineSmall,color=if(day==today) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
+                            }
+                            if(day.month!=first.month || day.year!=first.year) Text(day.format(DateTimeFormatter.ofPattern("MMM",Locale.getDefault())),style=MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    Box(Modifier.weight(1f)) { PlanningCard(row,onEvent) }
+                }
+            }
         }
     }
 }
