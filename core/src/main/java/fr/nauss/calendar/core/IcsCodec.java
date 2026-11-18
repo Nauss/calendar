@@ -59,30 +59,58 @@ public final class IcsCodec {
         }
     }
     private static String text(ValuedProperty<String> p) { return p==null || p.getValue()==null ? "" : p.getValue().replace("\r\n","\n"); }
-    private static IllegalArgumentException invalid() { return new IllegalArgumentException("Invalid or unsupported iCalendar resource"); }
-    private static void requireLosslessOffset(String value,biweekly.io.ParseContext context) {
-        // biweekly 0.6.8 drops nonzero UTC-OFFSET seconds on parse/write. Validate
-        // the library's unfolded property value, never scan or unfold raw ICS.
-        if(!value.matches("[+-](?:[01][0-9]|2[0-3])[0-5][0-9](?:00)?"))
-            context.addWarning("Unsupported timezone offset precision or syntax");
+    /** Public codes only: never expose parser messages or calendar fields in UI/logs. */
+    public static final class UnsupportedException extends IllegalArgumentException {
+        public final String reason;
+        UnsupportedException(String reason) { super("Unsupported calendar data: "+safeReadReason(reason));this.reason=safeReadReason(reason); }
+    }
+    private static UnsupportedException invalid() {
+        // Compiled source locations are diagnostic metadata, never imported values.
+        for(StackTraceElement frame:new Throwable().getStackTrace()) {
+            if(frame.getClassName().equals(IcsCodec.class.getName()) && !frame.getMethodName().equals("invalid") && frame.getLineNumber()>0)
+                return new UnsupportedException("DATA_SITE_"+frame.getLineNumber());
+        }
+        return new UnsupportedException("DATA");
+    }
+    /** Allowlisted diagnostic categories only; never forward a parser message or field name. */
+    public static String safeReadReason(String reason) {
+        if(reason==null) return "DATA";
+        return Set.of("DATA","LIMIT","RECURRENCE","TIMEZONE","RESPONSE","XML","PARTIAL","IDENTITY","METADATA","OFFSET_PRECISION").contains(reason)
+            || reason.matches("PARSE_WARNING_[0-9]{1,3}|DATA_(?:(?:NULL|DATE|ARGUMENT|ARITHMETIC|UNSUPPORTED|MISSING|OTHER)_)?SITE_[0-9]{1,4}") ? reason : "DATA";
+    }
+    public static String readFailureReason(Exception failure) {
+        if(failure instanceof UnsupportedException && !((UnsupportedException)failure).reason.equals("DATA")) return safeReadReason(((UnsupportedException)failure).reason);
+        String kind=failure instanceof NullPointerException?"NULL":failure instanceof DateTimeException?"DATE"
+            :failure instanceof IllegalArgumentException?"ARGUMENT":failure instanceof ArithmeticException?"ARITHMETIC"
+            :failure instanceof UnsupportedOperationException?"UNSUPPORTED":failure instanceof NoSuchElementException?"MISSING":"OTHER";
+        for(StackTraceElement frame:failure.getStackTrace()) {
+            if((frame.getClassName().equals(IcsCodec.class.getName()) || frame.getClassName().startsWith(IcsCodec.class.getName()+"$")) && frame.getLineNumber()>0)
+                return safeReadReason("DATA_"+kind+"_SITE_"+frame.getLineNumber());
+        }
+        return "DATA";
+    }
+    private static String writeCalendar(ICalendar calendar) {
+        // Reconciliation must use the same lossless offset writer as editing.
+        return biweekly.Biweekly.write(calendar).version(calendar.getVersion())
+            .register(SecondPrecisionOffsets.from()).register(SecondPrecisionOffsets.to()).go();
     }
     private static ICalendar parse(String raw, ZoneId zone) {
         if(raw==null || raw.length()>MAX_ICS_CHARS || !raw.trim().endsWith("END:VCALENDAR")) throw invalid();
         try(ICalReader reader=new ICalReader(raw)) {
-            reader.registerScribe(new biweekly.io.scribe.property.TimezoneOffsetFromScribe() {
-                @Override protected TimezoneOffsetFrom _parseText(String value,biweekly.ICalDataType type,biweekly.parameter.ICalParameters parameters,biweekly.io.ParseContext context) {
-                    requireLosslessOffset(value,context);return super._parseText(value,type,parameters,context);
-                }
-            });
-            reader.registerScribe(new biweekly.io.scribe.property.TimezoneOffsetToScribe() {
-                @Override protected TimezoneOffsetTo _parseText(String value,biweekly.ICalDataType type,biweekly.parameter.ICalParameters parameters,biweekly.io.ParseContext context) {
-                    requireLosslessOffset(value,context);return super._parseText(value,type,parameters,context);
-                }
-            });
+            reader.registerScribe(SecondPrecisionOffsets.from());
+            reader.registerScribe(SecondPrecisionOffsets.to());
             reader.setDefaultTimezone(TimeZone.getTimeZone(zone));
             ICalendar cal=reader.readNext();
-            // 37 is the well-understood IANA TZID without a leading slash; nothing was lost.
-            if(reader.getWarnings().stream().anyMatch(w->!Integer.valueOf(37).equals(w.getCode()))) throw invalid();
+            // 37 resolves an IANA TZID; 43 uses an exactly matching embedded VTIMEZONE.
+            // Neither falls back to the default timezone or drops data. Unknown zones
+            // (5/38) must still fail closed; never strip a vendor prefix or guess IANA.
+            for(var warning:reader.getWarnings()) {
+                Integer code=warning.getCode();
+                if(Integer.valueOf(37).equals(code) || Integer.valueOf(43).equals(code)) continue;
+                if(Integer.valueOf(5).equals(code) || Integer.valueOf(38).equals(code)) throw new UnsupportedException("TIMEZONE");
+
+                throw new UnsupportedException(code==null?"DATA":safeReadReason("PARSE_WARNING_"+code));
+            }
             if(cal==null || cal.getEvents().isEmpty() || cal.getEvents().size()>1000 || reader.readNext()!=null) throw invalid();
             String uid=null; int masters=0; Set<String> ids=new HashSet<>();
             for(VEvent e:cal.getEvents()) {
@@ -126,7 +154,9 @@ public final class IcsCodec {
         if(duration==null || duration.isPrior()) throw invalid();
         long days=part(duration.getWeeks())*7+part(duration.getDays());
         long seconds=part(duration.getHours())*3600+part(duration.getMinutes())*60+part(duration.getSeconds());
-        if(days>366 || seconds>366L*86400 || (!e.getDateStart().getValue().hasTime() && duration.hasTime())) throw invalid();
+        // A one-off long absence costs one occurrence, not years of recurrence work.
+        long limit=oneOff(cal,e)?366000:366;
+        if(days>limit || seconds>limit*86400 || (!e.getDateStart().getValue().hasTime() && duration.hasTime())) throw invalid();
         // RFC 5545: nominal calendar days first, then elapsed sub-day units.
         // Calendar retains embedded VTIMEZONE rules, not just IANA zone IDs.
         Calendar local=Calendar.getInstance(timeZone(cal,e.getDateStart(),display));
@@ -332,12 +362,28 @@ public final class IcsCodec {
             trigger.setParameters(new biweekly.parameter.ICalParameters(a.getTrigger().getParameters()));a.setTrigger(trigger);
         }
         }
-        return cal.write();
+        return writeCalendar(cal);
     }
     private static ICalDate floatingDate(LocalDateTime value) {
         return new ICalDate(new biweekly.util.DateTimeComponents(value.getYear(),value.getMonthValue(),value.getDayOfMonth(),value.getHour(),value.getMinute(),value.getSecond(),false),true);
     }
     private static boolean cancelled(VEvent e) { return e.getStatus()!=null && e.getStatus().isCancelled(); }
+    private static boolean oneOff(ICalendar cal,VEvent e) {
+        return cal.getEvents().size()==1 && e.getRecurrenceId()==null && e.getRecurrenceRule()==null
+            && e.getRecurrenceDates().isEmpty() && e.getExceptionDates().isEmpty() && e.getProperties(ExceptionRule.class).isEmpty();
+    }
+    private static void requireSafeHourlyZone(ICalendar cal,VEvent event,Instant start,Instant hi,ZoneId display) {
+        // biweekly's hourly iterator can normalize a DST gap into duplicate instants.
+        // Keep the mature iterator for stable-offset ranges; do not invent a DST recurrence engine.
+        if(!cal.getTimezoneInfo().getComponents().isEmpty()) throw new UnsupportedException("TIMEZONE");
+        try {
+            ZoneId zone=timeZone(cal,event.getDateStart(),display).toZoneId();
+            var rules=zone.getRules();
+            if(rules.getValidOffsets(LocalDateTime.ofInstant(start,zone)).size()!=1) throw new UnsupportedException("TIMEZONE");
+            var transition=rules.nextTransition(start.minusSeconds(1));
+            if(transition!=null && transition.getInstant().isBefore(hi)) throw new UnsupportedException("TIMEZONE");
+        } catch(DateTimeException ex) { throw new UnsupportedException("TIMEZONE"); }
+    }
     public static List<Occurrence> expand(String raw, LocalDate from, LocalDate until, ZoneId display) {
         if(!until.isAfter(from) || ChronoUnit.DAYS.between(from,until)>370) throw new IllegalArgumentException("Expansion window must be 1–370 days");
         ICalendar cal=parse(raw,display); VEvent main=master(cal);
@@ -345,7 +391,7 @@ public final class IcsCodec {
         List<Occurrence> result=new ArrayList<>(); Map<Instant,VEvent> overrides=new HashMap<>();
         for(VEvent e:cal.getEvents()) {
             if(e.getRecurrenceId()!=null) {
-                if(e.getRecurrenceId().getRange()!=null) throw new IllegalArgumentException("RANGE recurrence is not supported");
+                if(e.getRecurrenceId().getRange()!=null) throw new UnsupportedException("RECURRENCE");
                 Instant id=instant(e.getRecurrenceId(),display); overrides.put(id,e);
                 if(!cancelled(e)) add(result,e,instant(e.getDateStart(),display),eventEnd(cal,e,instant(e.getDateStart(),display),display),id.toString(),lo,hi);
             }
@@ -353,20 +399,27 @@ public final class IcsCodec {
         if(main.getRecurrenceId()==null && !cancelled(main)) {
             for(RecurrenceRule rule: main.getProperties(RecurrenceRule.class)) {
                 Recurrence r=rule.getValue();
-                if(!Set.of(Frequency.DAILY,Frequency.WEEKLY,Frequency.MONTHLY,Frequency.YEARLY).contains(r.getFrequency()) || !r.getXRules().isEmpty()) throw new IllegalArgumentException("High-frequency recurrence is not supported");
-                if(r.getByHour().size()>24 || r.getByMinute().size()>1 || r.getBySecond().size()>1) throw new IllegalArgumentException("Recurrence too dense");
+                if(!Set.of(Frequency.HOURLY,Frequency.DAILY,Frequency.WEEKLY,Frequency.MONTHLY,Frequency.YEARLY).contains(r.getFrequency()) || !r.getXRules().isEmpty()) throw new UnsupportedException("RECURRENCE");
+                if(r.getFrequency()==Frequency.HOURLY && !main.getDateStart().getValue().hasTime()) throw invalid();
+                if(r.getByHour().size()>24 || r.getByMinute().size()>1 || r.getBySecond().size()>1) throw new UnsupportedException("LIMIT");
             }
-            if(!main.getProperties(ExceptionRule.class).isEmpty() || main.getRecurrenceDates().stream().anyMatch(r->!r.getPeriods().isEmpty())) throw new IllegalArgumentException("Complex recurrence dates are not supported");
+            if(!main.getProperties(ExceptionRule.class).isEmpty() || main.getRecurrenceDates().stream().anyMatch(r->!r.getPeriods().isEmpty())) throw new UnsupportedException("RECURRENCE");
             Instant start=instant(main.getDateStart(),display), end=eventEnd(cal,main,start,display);
+            if(main.getProperties(RecurrenceRule.class).stream().anyMatch(r->r.getValue().getFrequency()==Frequency.HOURLY)) requireSafeHourlyZone(cal,main,start,hi,display);
             long duration=java.time.Duration.between(start,end).toMillis();
-            if(duration<0 || duration>366L*86400000) throw invalid();
+            if(duration<0) throw invalid();
+            if(oneOff(cal,main)) {
+                add(result,main,start,end,start.toString(),lo,hi);
+                return result;
+            }
+            if(duration>366L*86400000) throw new UnsupportedException("LIMIT");
             boolean allDay=!main.getDateStart().getValue().hasTime();
             long days=allDay?ChronoUnit.DAYS.between(start.atZone(display).toLocalDate(),end.atZone(display).toLocalDate()):0;
             var iterator=main.getDateIterator(timeZone(cal,main.getDateStart(),display));
             // Iteration has a hard work budget, including historical instances. Fail visibly, never hang.
             int steps=0;
             while(iterator.hasNext()) {
-                if(++steps>20000) throw new IllegalArgumentException("Recurrence expansion limit exceeded");
+                if(++steps>20000) throw new UnsupportedException("LIMIT");
                 Date next=iterator.next();
                 Instant occurrence=allDay ? next.toInstant().atZone(ZoneId.systemDefault()).toLocalDate().atStartOfDay(display).toInstant() : next.toInstant();
                 if(!occurrence.isBefore(hi)) break;
@@ -379,12 +432,12 @@ public final class IcsCodec {
     }
     private static void add(List<Occurrence> out,VEvent e,Instant start,Instant end,String key,Instant lo,Instant hi) {
         if(start.isBefore(hi) && (end.isAfter(lo) || (start.equals(end) && !start.isBefore(lo)))) {
-            if(out.size()>=MAX_OCCURRENCES) throw new IllegalArgumentException("Too many occurrences");
+            if(out.size()>=MAX_OCCURRENCES) throw new UnsupportedException("LIMIT");
             out.add(new Occurrence(e,start,end,key));
         }
     }
     /** Conservative lost-create-response reconciliation: no subset/UID-only comparisons. */
     public static boolean equivalent(String a,String b) {
-        return parse(a,ZoneOffset.UTC).write().equals(parse(b,ZoneOffset.UTC).write());
+        return writeCalendar(parse(a,ZoneOffset.UTC)).equals(writeCalendar(parse(b,ZoneOffset.UTC)));
     }
 }

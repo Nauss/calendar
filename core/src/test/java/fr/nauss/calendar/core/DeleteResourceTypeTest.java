@@ -7,6 +7,32 @@ import static org.junit.Assert.*;
 
 /** A collection can export perfectly valid single-event ICS. GET alone cannot authorize DELETE. */
 public class DeleteResourceTypeTest {
+    @Test public void multilineOrControlledStatusCannotAuthorizeADelete() {
+        for(String status:List.of("HTTP/1.1 200 OK&#10;HTTP/1.1 403 Forbidden","HTTP/1.1 200 O&#x7f;K")) {
+            typeResponse=envelope(row("/cal/opaque","<d:resourcetype/>",status));assertRefusedWithoutLosingPending();
+        }
+    }
+    @Test public void excessiveNestingCannotAuthorizeAnyDelete() {
+        typeResponse=envelope(row("/cal/opaque","<d:resourcetype/>","HTTP/1.1 200 OK")+
+            "<d:responsedescription xmlns:x='urn:fixture'>"+"<x:n>".repeat(20000)+"</x:n>".repeat(20000)+"</d:responsedescription>");
+        assertRefusedWithoutLosingPending();
+    }
+    @Test public void ambiguousTypeProofNeverAuthorizesADelete() {
+        String valid=row("/cal/opaque","<d:resourcetype/>","HTTP/1.1 200 OK");
+        String success="<d:status>HTTP/1.1 200 OK</d:status>";
+        for(String bad:List.of(
+            envelope(valid.replace("</d:response>",success+"<d:status>HTTP/1.1 403 Forbidden</d:status></d:response>")),
+            envelope(valid.replace("</d:response>",success+"</d:response>")),
+            envelope(valid.replace(success,success+success)),
+            envelope(valid.replace("</d:response>","<d:responsedescription><d:resourcetype><d:collection/></d:resourcetype></d:responsedescription></d:response>")),
+            envelope(valid.replace("</d:response>","<d:responsedescription><d:status>HTTP/1.1 403 Forbidden</d:status></d:responsedescription></d:response>")),
+            envelope(valid+"<d:responsedescription><d:status>HTTP/1.1 403 Forbidden</d:status></d:responsedescription>"),
+            envelope(valid+"<d:responsedescription><d:limit-reached/></d:responsedescription>"),
+            envelope(valid+"<unexpected xmlns='urn:fixture'>incomplete proof</unexpected>"),
+            envelope("unexpected"+valid),envelope(valid.replace("<d:prop>","<d:prop>unexpected")))) {
+            typeResponse=bad;assertRefusedWithoutLosingPending();
+        }
+    }
     private MockWebServer server;
     private final List<RecordedRequest> requests=new ArrayList<>();
     private String typeResponse;
@@ -44,6 +70,7 @@ public class DeleteResourceTypeTest {
         assertFalse("Unproven DAV type must retain the deletion",engine.sync(op.calendar));
         assertSame(op,store.pending.get(0));assertEquals(raw,store.pending.get(0).ics);
         assertEquals(0,store.acknowledged);assertFalse(store.applied);assertNotNull(store.failure);
+        assertEquals(typeStatus==207?"REPORT":typeStatus==401?"AUTH":typeStatus==403?"PERMISSION":"SERVER",engine.error());
         assertEquals(List.of("GET","PROPFIND"),requests.stream().map(RecordedRequest::getMethod).toList());
         var proof=requests.get(1);
         assertEquals("/cal/opaque",proof.getPath());assertEquals("0",proof.getHeader("Depth"));

@@ -4,8 +4,12 @@ import okhttp3.*;
 import org.w3c.dom.*;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
+import org.xml.sax.helpers.DefaultHandler;
 import javax.xml.parsers.*;
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -16,6 +20,7 @@ public final class DavClient {
     private static final String DAV="DAV:", CAL="urn:ietf:params:xml:ns:caldav";
     private static final MediaType XML=MediaType.get("application/xml; charset=utf-8"), ICS=MediaType.get("text/calendar; charset=utf-8");
     private static final int MAX_BODY=16_000_000;
+    private static final int MAX_XML_DEPTH=128;
     private final HttpUrl root;
     private final String authorization;
     private final OkHttpClient http;
@@ -32,6 +37,12 @@ public final class DavClient {
         public DavException(int status) { super("CalDAV HTTP "+status); this.status=status; }
     }
     public static final class ConflictException extends DavException { public ConflictException() { super(412); } }
+    /** A received response cannot safely replace cache; distinct from a connection failure. */
+    public static final class DataException extends IOException {
+        public final String reason;
+        public DataException() { this("RESPONSE"); }
+        public DataException(String reason) { super("Incomplete or unsupported calendar response; cache retained: "+IcsCodec.safeReadReason(reason));this.reason=IcsCodec.safeReadReason(reason); }
+    }
     public DavClient(String endpoint,String user,String password,boolean localHttp) {
         root=validateEndpoint(endpoint,localHttp);
         if(user.indexOf(':')>=0 || user.indexOf('\n')>=0 || user.indexOf('\r')>=0) throw new IllegalArgumentException("Invalid user name");
@@ -98,22 +109,40 @@ public final class DavClient {
     }
     private Request.Builder request(HttpUrl url) { return new Request.Builder().url(url).header("Authorization",authorization).header("Accept","application/xml, text/calendar").header("User-Agent","Agenda/0.1").header("Connection","close"); }
     private static String body(Response r) throws IOException {
-        if(r.body()==null) throw new IOException("Empty server response");
-        if(r.body().contentLength()>MAX_BODY) throw new IOException("Response too large");
+        if(r.body()==null) throw new DataException();
+        if(r.body().contentLength()>MAX_BODY) throw new DataException();
         try(InputStream in=r.body().byteStream(); ByteArrayOutputStream out=new ByteArrayOutputStream()) {
             byte[] buffer=new byte[8192]; int n,total=0;
-            while((n=in.read(buffer))!=-1) { total+=n; if(total>MAX_BODY) throw new IOException("Response too large"); out.write(buffer,0,n); }
-            return out.toString(StandardCharsets.UTF_8.name());
-        }
+            while((n=in.read(buffer))!=-1) { total+=n; if(total>MAX_BODY) throw new DataException(); out.write(buffer,0,n); }
+            return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(out.toByteArray())).toString();
+        } catch(CharacterCodingException e) { throw new DataException(); }
     }
     private static IOException failure(int code) { return code==412 ? new ConflictException() : new DavException(code); }
     private static void feature(DocumentBuilderFactory f,String name,boolean value) {
         try { f.setFeature(name,value); } catch(ParserConfigurationException ignored) { /* Android lacks some Xerces features. DTDs are rejected before parsing, resolver rejects all entities. */ }
     }
+    private static void checkXmlDepth(String raw) throws ParserConfigurationException,SAXException,IOException {
+        // SAX is available on both Android and JVM; reject depth before allocating a DOM.
+        SAXParserFactory f=SAXParserFactory.newInstance(); f.setNamespaceAware(true);
+        var reader=f.newSAXParser().getXMLReader();
+        DefaultHandler handler=new DefaultHandler() {
+            private int depth;
+            @Override public void startElement(String uri,String localName,String qName,org.xml.sax.Attributes attributes) throws SAXException {
+                if(++depth>MAX_XML_DEPTH) throw new SAXException("XML depth exceeded");
+            }
+            @Override public void endElement(String uri,String localName,String qName) { depth--; }
+            @Override public InputSource resolveEntity(String publicId,String systemId) throws SAXException { throw new SAXException("External entities rejected"); }
+            @Override public void fatalError(org.xml.sax.SAXParseException e) throws SAXException { throw e; }
+            @Override public void error(org.xml.sax.SAXParseException e) throws SAXException { throw e; }
+        };
+        reader.setContentHandler(handler); reader.setEntityResolver(handler); reader.setErrorHandler(handler);
+        reader.parse(new InputSource(new StringReader(raw)));
+    }
     private static Document xml(String raw) throws IOException {
         String upper=raw.toUpperCase(Locale.ROOT);
-        if(upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY")) throw new IOException("DTD/entity rejected");
+        if(upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY")) throw new DataException();
         try {
+            checkXmlDepth(raw);
             DocumentBuilderFactory f=DocumentBuilderFactory.newInstance(); f.setNamespaceAware(true); f.setExpandEntityReferences(false);
             feature(f,"http://apache.org/xml/features/disallow-doctype-decl",true);
             feature(f,"http://xml.org/sax/features/external-general-entities",false);
@@ -123,9 +152,9 @@ public final class DavClient {
             b.setEntityResolver((publicId,systemId)->{ throw new SAXException("External entities rejected"); });
             b.setErrorHandler(new org.xml.sax.helpers.DefaultHandler() { @Override public void fatalError(org.xml.sax.SAXParseException e) throws SAXException { throw e; } @Override public void error(org.xml.sax.SAXParseException e) throws SAXException { throw e; } });
             Document d=b.parse(new InputSource(new StringReader(raw)));
-            if(!DAV.equals(d.getDocumentElement().getNamespaceURI()) || !"multistatus".equals(d.getDocumentElement().getLocalName())) throw new IOException("Not a multistatus response");
+            if(!DAV.equals(d.getDocumentElement().getNamespaceURI()) || !"multistatus".equals(d.getDocumentElement().getLocalName())) throw new DataException();
             return d;
-        } catch(ParserConfigurationException | SAXException e) { throw new IOException("Malformed DAV response"); }
+        } catch(ParserConfigurationException | SAXException e) { throw new DataException(); }
     }
     private static List<Element> children(Element p,String ns,String tag) {
         List<Element> out=new ArrayList<>();
@@ -133,9 +162,36 @@ public final class DavClient {
         return out;
     }
     private static Element first(Element p,String ns,String tag) { List<Element> list=children(p,ns,tag); return list.isEmpty()?null:list.get(0); }
-    private static String text(Element p,String ns,String tag) { Element e=first(p,ns,tag); return e==null?null:e.getTextContent().trim(); }
+    private static String text(Element p,String ns,String tag) { Element e=first(p,ns,tag); return e==null?null:DAV.equals(ns) && "status".equals(tag)?e.getTextContent():e.getTextContent().trim(); }
     private static boolean contains(Element p,String ns,String tag) { return p!=null && p.getElementsByTagNameNS(ns,tag).getLength()>0; }
-    private static boolean ok(String status) { return status!=null && (status.startsWith("HTTP/1.1 200 ") || status.startsWith("HTTP/2 200 ") || status.equals("HTTP/1.1 200")); }
+    private static int statusCode(String status) {
+        if(status==null) return -1;
+        int start;
+        if(status.startsWith("HTTP/1.1 ") || status.startsWith("HTTP/1.0 ")) start=9;
+        else if(status.startsWith("HTTP/2 ")) start=7;
+        else return -1;
+        if(status.length()<start+3) return -1;
+        int code=0;
+        for(int i=start;i<start+3;i++) {
+            char c=status.charAt(i);
+            if(c<'0' || c>'9') return -1;
+            code=code*10+c-'0';
+        }
+        if(status.length()>start+3 && status.charAt(start+3)!=' ') return -1;
+        // Validate the entire reason, without trimming away trailing controls.
+        // HTTP reason text is printable ASCII/obs-text, never another status line.
+        for(int i=start+3;i<status.length();i++) {
+            char c=status.charAt(i);
+            if(c<0x20 || (c>=0x7f && c<=0x9f) || c>0xff) return -1;
+        }
+        return code;
+    }
+    private static boolean ok(String status) { return statusCode(status)==200; }
+    private static IOException failedStatus(String status) {
+        int code=statusCode(status);
+        if(code==401 || code==403) return new DavException(code);
+        return new DataException();
+    }
     private List<Element> propfind(String href,String depth) throws IOException {
         String payload="<d:propfind xmlns:d='DAV:' xmlns:c='urn:ietf:params:xml:ns:caldav' xmlns:a='http://apple.com/ns/ical/'><d:prop><d:current-user-principal/><c:calendar-home-set/><d:resourcetype/><d:displayname/><d:current-user-privilege-set/><a:calendar-color/><c:supported-calendar-component-set/></d:prop></d:propfind>";
         try(Response r=http.newCall(request(resolve(href)).header("Depth",depth).method("PROPFIND",RequestBody.create(payload,XML)).build()).execute()) {
@@ -144,7 +200,7 @@ public final class DavClient {
         }
     }
     private List<Element> successfulProps(Element response) throws IOException {
-        String status=text(response,DAV,"status"); if(status!=null && !ok(status)) throw new IOException("Incomplete DAV response");
+        String status=text(response,DAV,"status"); if(status!=null && !ok(status)) throw failedStatus(status);
         List<Element> props=new ArrayList<>();
         for(Element ps:children(response,DAV,"propstat")) if(ok(text(ps,DAV,"status"))) {
             Element p=first(ps,DAV,"prop"); if(p!=null) props.add(p);
@@ -195,29 +251,103 @@ public final class DavClient {
         String payload="<c:calendar-query xmlns:d='DAV:' xmlns:c='urn:ietf:params:xml:ns:caldav'><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name='VCALENDAR'><c:comp-filter name='VEVENT'/></c:comp-filter></c:filter></c:calendar-query>";
         try(Response r=http.newCall(request(c).header("Depth","1").method("REPORT",RequestBody.create(payload,XML)).build()).execute()) {
             if(r.code()!=207) throw failure(r.code());
-            Element document=xml(body(r)).getDocumentElement();
-            for(Node child=document.getFirstChild();child!=null;child=child.getNextSibling()) {
-                if(child instanceof Element && !(DAV.equals(child.getNamespaceURI()) && ("response".equals(child.getLocalName()) || "responsedescription".equals(child.getLocalName())))) throw new IOException("Unknown report envelope; cache retained");
+            return parseReport(collection,body(r));
+        }
+    }
+    // Snapshot/type-proof validation: discovery keeps separate property semantics.
+    private static String reportScalar(Element value) throws DataException {
+        for(Node n=value.getFirstChild();n!=null;n=n.getNextSibling()) if(n instanceof Element) throw new DataException();
+        return value.getTextContent();
+    }
+    private static void reportMetadata(Element value) throws DataException {
+        Node n=value;
+        while(n!=null) {
+            if(n instanceof Element && ((DAV.equals(n.getNamespaceURI()) && Set.of("href","status","propstat","prop","response","getetag").contains(n.getLocalName()))
+                || (CAL.equals(n.getNamespaceURI()) && "calendar-data".equals(n.getLocalName())))) throw new DataException();
+            if(n.getFirstChild()!=null) n=n.getFirstChild();
+            else {
+                while(n!=value && n.getNextSibling()==null) n=n.getParentNode();
+                n=n==value?null:n.getNextSibling();
             }
-            if(contains(document,DAV,"error") || contains(document,CAL,"limit-recurrence-set")) throw new IOException("Partial report rejected");
+        }
+    }
+    private static void reportChildren(Element parent,String... allowed) throws DataException {
+        requireElementContent(parent);
+        for(Node n=parent.getFirstChild();n!=null;n=n.getNextSibling()) if(n instanceof Element) {
+            if(!DAV.equals(n.getNamespaceURI()) || !Arrays.asList(allowed).contains(n.getLocalName())) reportMetadata((Element)n);
+        }
+    }
+    private static void requireElementContent(Element parent) throws DataException {
+        for(Node n=parent.getFirstChild();n!=null;n=n.getNextSibling())
+            if((n.getNodeType()==Node.TEXT_NODE || n.getNodeType()==Node.CDATA_SECTION_NODE) && !n.getNodeValue().trim().isEmpty()) throw new DataException();
+    }
+    private static List<Element> reportProps(Element row) throws IOException {
+        reportChildren(row,"href","status","propstat");
+        var statuses=children(row,DAV,"status");
+        var propstats=children(row,DAV,"propstat");
+        if(statuses.size()>1) throw new DataException();
+        String responseStatus=statuses.isEmpty()?null:reportScalar(statuses.get(0));
+        List<Element> props=new ArrayList<>();
+        List<String> propStatuses=new ArrayList<>();
+        for(Element ps:propstats) {
+            reportChildren(ps,"status","prop");
+            var codes=children(ps,DAV,"status");var containers=children(ps,DAV,"prop");
+            if(codes.size()!=1 || containers.size()!=1) throw new DataException();
+            propStatuses.add(reportScalar(codes.get(0)));
+            Element prop=containers.get(0);
+            requireElementContent(prop);
+            for(Node n=prop.getFirstChild();n!=null;n=n.getNextSibling()) if(n instanceof Element) {
+                if((DAV.equals(n.getNamespaceURI()) && "getetag".equals(n.getLocalName())) || (CAL.equals(n.getNamespaceURI()) && "calendar-data".equals(n.getLocalName()))) reportScalar((Element)n);
+                else reportMetadata((Element)n);
+            }
+            props.add(prop);
+        }
+        if(responseStatus!=null) {
+            if(!ok(responseStatus)) throw failedStatus(responseStatus);
+            // A resource success is represented by propstat, never also by response/status.
+            throw new DataException();
+        }
+        for(String status:propStatuses) if(!ok(status)) throw failedStatus(status);
+        return props;
+    }
+    private static void reportEnvelope(Element document) throws DataException {
+        requireElementContent(document);
+        if(contains(document,DAV,"error") || contains(document,DAV,"limit-reached") || contains(document,CAL,"limit-recurrence-set")) throw new DataException();
+        for(Node child=document.getFirstChild();child!=null;child=child.getNextSibling()) {
+            if(child instanceof Element && !(DAV.equals(child.getNamespaceURI()) && ("response".equals(child.getLocalName()) || "responsedescription".equals(child.getLocalName())))) throw new DataException();
+            if(child instanceof Element && "responsedescription".equals(child.getLocalName())) reportMetadata((Element)child);
+        }
+    }
+    /** Same decoder as REPORT; package-private for offline synthetic regression tests. */
+    List<Resource> parseReport(String collection,String raw) throws IOException {
+        HttpUrl c=resolve(collection);
+        try {
+            Element document=xml(raw).getDocumentElement();
+            reportEnvelope(document);
+
             List<Resource> out=new ArrayList<>(); Set<String> hrefs=new HashSet<>(),uids=new HashSet<>();
             for(Element row:children(document,DAV,"response")) {
+                if(children(row,DAV,"href").size()!=1) throw new DataException();
+                reportScalar(children(row,DAV,"href").get(0));
                 HttpUrl url=resolve(text(row,DAV,"href"));
-                if(!isResourceHref(c.toString(),url.toString())) throw new IOException("Foreign collection member");
+                if(!isResourceHref(c.toString(),url.toString())) throw new DataException();
                 String etag=null,data=null;
-                for(Element ps:children(row,DAV,"propstat")) if(!ok(text(ps,DAV,"status"))) throw new IOException("Partial report rejected");
-                for(Element p:successfulProps(row)) {
-                    if(text(p,DAV,"getetag")!=null) etag=text(p,DAV,"getetag");
-                    Element value=first(p,CAL,"calendar-data"); if(value!=null) data=value.getTextContent();
+                int etags=0,values=0;
+                for(Element p:reportProps(row)) {
+                    for(Element value:children(p,DAV,"getetag")) { etags++;etag=reportScalar(value).trim(); }
+                    for(Element value:children(p,CAL,"calendar-data")) { values++;data=reportScalar(value); }
                 }
-                if(etag==null || data==null || data.isEmpty() || !hrefs.add(url.toString()) || out.size()>=20000) throw new IOException("Incomplete report rejected");
+                if(etags!=1 || values!=1) throw new DataException();
+                if(etag==null || data==null || data.isEmpty() || !hrefs.add(url.toString()) || out.size()>=20000) throw new DataException();
                 Resource resource;
-                try { resource=new Resource(url.toString(),etag,data); } catch(IllegalArgumentException ex) { throw new IOException("Invalid calendar data; cache retained"); }
-                if(!uids.add(resource.uid)) throw new IOException("Duplicate UID in collection; cache retained");
+                try { resource=new Resource(url.toString(),etag,data); }
+                catch(IcsCodec.UnsupportedException ex) { throw new DataException(ex.reason); }
+                catch(IllegalArgumentException ex) { throw new DataException("DATA"); }
+                if(!uids.add(resource.uid)) throw new DataException();
                 out.add(resource);
             }
             return out;
-        }
+        } catch(IllegalArgumentException ex) { throw new DataException(); }
     }
     public static boolean strongEtag(String etag) {
         if(etag==null || etag.length()<2 || etag.length()>4096 || etag.charAt(0)!='"' || etag.charAt(etag.length()-1)!='"') return false;
@@ -230,7 +360,9 @@ public final class DavClient {
         try(Response r=http.newCall(request(u).get().build()).execute()) {
             if(r.code()!=200) throw failure(r.code());
             String etag=r.header("ETag"); requireEtag(etag);
-            try { return new Resource(u.toString(),etag,body(r)); } catch(IllegalArgumentException ex) { throw new IOException("Invalid resource response"); }
+            try { return new Resource(u.toString(),etag,body(r)); }
+            catch(IcsCodec.UnsupportedException ex) { throw new DataException(ex.reason); }
+            catch(IllegalArgumentException ex) { throw new DataException(); }
         }
     }
     public Resource put(String collection,String href,String etag,String raw) throws IOException {
@@ -256,23 +388,22 @@ public final class DavClient {
         try(Response r=http.newCall(request(url).header("Depth","0").method("PROPFIND",RequestBody.create(payload,XML)).build()).execute()) {
             if(r.code()!=207) throw failure(r.code());
             Element document=xml(body(r)).getDocumentElement();
+            reportEnvelope(document);
             List<Element> rows=children(document,DAV,"response");
-            if(rows.size()!=1 || contains(document,DAV,"error")) throw new IOException("Unproven resource type");
+            if(rows.size()!=1) throw new DataException();
             Element row=rows.get(0);
-            if(children(row,DAV,"href").size()!=1 || !url.equals(resolve(text(row,DAV,"href")))) throw new IOException("Resource type identity mismatch");
-            String status=text(row,DAV,"status");
-            if(status!=null && !ok(status)) throw new IOException("Failed resource type response");
+            if(children(row,DAV,"href").size()!=1 || !url.equals(resolve(text(row,DAV,"href")))) throw new DataException();
+            reportScalar(children(row,DAV,"href").get(0));
             int types=0;
-            for(Element ps:children(row,DAV,"propstat")) {
-                if(children(ps,DAV,"status").size()!=1 || !ok(text(ps,DAV,"status")) || children(ps,DAV,"prop").size()!=1) throw new IOException("Incomplete resource type response");
-                for(Element type:children(first(ps,DAV,"prop"),DAV,"resourcetype")) {
+            for(Element prop:reportProps(row)) {
+                for(Element type:children(prop,DAV,"resourcetype")) {
                     types++;
                     // Only an explicit empty DAV resourcetype proves a non-collection.
                     // Unknown types, nested elements and malformed text all fail closed.
-                    if(!type.getTextContent().trim().isEmpty() || type.getElementsByTagName("*").getLength()!=0) throw new IOException("Not an ordinary event resource");
+                    if(!type.getTextContent().trim().isEmpty() || type.getElementsByTagName("*").getLength()!=0) throw new DataException();
                 }
             }
-            if(types!=1) throw new IOException("Missing or ambiguous resource type");
+            if(types!=1 || document.getElementsByTagNameNS(DAV,"resourcetype").getLength()!=1) throw new DataException();
         }
     }
     public void delete(String collection,String href,String etag) throws IOException {

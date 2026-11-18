@@ -29,7 +29,7 @@ public class DavClientTest {
         respond(xml("<d:response><d:href>/cal/a.ics</d:href><d:status>HTTP/1.1 500 ERROR</d:status></d:response>"));
         assertThrows(java.io.IOException.class,()->client().report(url("/cal/")));
         respond(xml(row("https://evil.invalid/a.ics","<d:getetag>&quot;1&quot;</d:getetag><c:calendar-data>bad</c:calendar-data>")));
-        assertThrows(IllegalArgumentException.class,()->client().report(url("/cal/")));
+        assertThrows(DavClient.DataException.class,()->client().report(url("/cal/")));
         respond("<!DOCTYPE d:multistatus [<!ENTITY x SYSTEM 'file:///nonexistent'>]>"+xml("&x;"));
         assertThrows(java.io.IOException.class,()->client().report(url("/cal/")));
     }
