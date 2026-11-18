@@ -223,7 +223,7 @@ object WidgetRenderer {
     }
     fun eventRow(context: Context,row: AgendaRow): RemoteViews {
         val view=RemoteViews(context.packageName,R.layout.widget_event_row);val event=row.event;val o=event.occurrence;val palette=palette(context)
-        val base=calendarColor(event.calendar.color);val foreground=calendarEventTextColor(base).toArgb()
+        val base=planningEventColor(event);val foreground=calendarEventTextColor(base).toArgb()
         view.setInt(R.id.widget_card_background,"setColorFilter",base.toArgb())
         view.setTextViewText(R.id.widget_date,row.day.format(DateTimeFormatter.ofPattern("EEE\nd",locale(context))))
         view.setTextColor(R.id.widget_date,if(row.day==LocalDate.now()) palette.primary else palette.text)

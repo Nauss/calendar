@@ -1,0 +1,4 @@
+<resources>
+    <string name="allow_local_network">Autoriser un serveur sur mon réseau local</string>
+    <string name="local_network_denied">Pour joindre le serveur de la maison, autorisez les appareils à proximité dans les permissions Android de cette application. Un serveur sur Internet ne nécessite pas cette autorisation.</string>
+</resources>

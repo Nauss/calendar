@@ -51,7 +51,10 @@ import java.time.format.FormatStyle
         Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             Text(stringResource(R.string.appearance),style=MaterialTheme.typography.titleMedium)
             Choice(stringResource(R.string.appearance),state.theme,listOf("system" to stringResource(R.string.system_theme),"light" to stringResource(R.string.light_theme),"dark" to stringResource(R.string.dark_theme))) { app.store.setMeta("theme",it);onChanged() }
-            Choice(stringResource(R.string.default_calendar),state.defaultCalendar,state.calendars.filter { it.writable && it.enabled }.map { it.id to calendarName(it) }) { app.store.setMeta("default_calendar",it);onChanged() }
+            val destinations=creationCalendars(state.calendars,app.allowLocalCreation)
+            val defaultDestination=creationDefault(state.calendars,state.defaultCalendar,app.allowLocalCreation)
+            Choice(stringResource(R.string.default_calendar),defaultDestination.ifEmpty { stringResource(R.string.choose_nas_calendar) },destinations.map { it.id to calendarName(it) },enabled=destinations.isNotEmpty(),tag="default_calendar") { app.store.setMeta("default_calendar",it);onChanged() }
+            Text(stringResource(R.string.nas_creation_hint),style=MaterialTheme.typography.bodySmall)
             HorizontalDivider(Modifier.padding(vertical=8.dp))
             Text(stringResource(R.string.widgets),style=MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.widget_pin_hint),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -67,22 +70,28 @@ import java.time.format.FormatStyle
             }
             HorizontalDivider(Modifier.padding(vertical=8.dp))
             Text(stringResource(R.string.status),style=MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.auto_sync_policy,SyncTasks.REMOTE_REFRESH_HOURS),style=MaterialTheme.typography.bodySmall)
             if(state.syncing) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if(state.pending>0) Text(stringResource(R.string.pending,state.pending),color=MaterialTheme.colorScheme.primary)
-            if(state.syncError.isNotEmpty()) Text(stringResource(when(state.syncError) { "CONFLICT"->R.string.conflict;"AUTH"->R.string.auth_error;else->R.string.sync_error }),color=MaterialTheme.colorScheme.error)
+            SyncStatusMessages(state)
             Text(state.lastSync.toLongOrNull()?.let { stringResource(R.string.last_sync,Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT))) } ?: stringResource(R.string.never_synced),style=MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick={SyncTasks.now(context);onChanged()},enabled=!state.syncing,modifier=Modifier.fillMaxWidth().testTag("manual_sync")) { Icon(Icons.Default.Sync,null);Spacer(Modifier.width(12.dp));Text(stringResource(R.string.sync)) }
-            val review=(state.records.filter { it.deleted || it.error=="CONFLICT" }+state.unsupported).distinctBy { it.id }
-            if(review.isNotEmpty()) {
-                Text(stringResource(R.string.pending_deletions),style=MaterialTheme.typography.titleSmall)
-                review.forEach { e ->
+            state.lastUpload.toLongOrNull()?.let { Text(stringResource(R.string.last_upload,Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT))),style=MaterialTheme.typography.bodySmall) }
+            OutlinedButton(onClick={SyncTasks.manual(context);onChanged()},enabled=!state.syncing,modifier=Modifier.fillMaxWidth().testTag("manual_sync")) { Icon(Icons.Default.Sync,null);Spacer(Modifier.width(12.dp));Text(stringResource(R.string.sync)) }
+            reviewSections(state.records,state.unsupported).forEach { section ->
+                val heading=when(section.kind) { ReviewKind.CONFLICT->R.string.review_conflicts;ReviewKind.PENDING_DELETE->R.string.review_deletions;ReviewKind.UNSUPPORTED->R.string.review_unsupported }
+                val reason=when(section.kind) { ReviewKind.CONFLICT->R.string.sync_conflict_reason;ReviewKind.PENDING_DELETE->R.string.pending_delete_reason;ReviewKind.UNSUPPORTED->R.string.unsupported_review_reason }
+                Text(stringResource(heading),style=MaterialTheme.typography.titleSmall,modifier=Modifier.testTag("review_${section.kind}"))
+                Text(stringResource(reason),style=MaterialTheme.typography.bodySmall)
+                section.records.forEach { e ->
                     val label=remember(e.raw) { runCatching { IcsCodec.inspect(e.raw,ZoneId.systemDefault()).draft.title }.getOrDefault("") }
                     OutlinedButton(onClick={onEvent(e.id)},modifier=Modifier.fillMaxWidth()) { Text(label.ifBlank { stringResource(R.string.untitled) }) }
+                    if(e.id in state.unsupportedReasons) Text(stringResource(unsupportedReasonMessage(state.unsupportedReasons[e.id])),style=MaterialTheme.typography.bodySmall)
+                    if(e.error.isNotEmpty() && e.error!="CONFLICT") syncErrorMessages(e.error).forEach { Text(stringResource(it),style=MaterialTheme.typography.bodySmall) }
                 }
             }
             HorizontalDivider(Modifier.padding(vertical=8.dp))
             Text(stringResource(R.string.account),style=MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.account_hint),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            LocalNetworkPermission()
             OutlinedTextField(endpoint,{endpoint=it;result=null;candidate=null},label={Text(stringResource(R.string.endpoint))},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Uri),modifier=Modifier.fillMaxWidth().testTag("server_url"),enabled=!busy)
             OutlinedTextField(username,{username=it;result=null;candidate=null},label={Text(stringResource(R.string.username))},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Ascii),modifier=Modifier.fillMaxWidth().testTag("server_username"),enabled=!busy)
             OutlinedTextField(password,{password=it;result=null;candidate=null},label={Text(stringResource(R.string.password))},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password),visualTransformation=if(shown) VisualTransformation.None else PasswordVisualTransformation(),trailingIcon={IconButton(onClick={shown=!shown}){Icon(if(shown) Icons.Default.VisibilityOff else Icons.Default.Visibility,stringResource(if(shown) R.string.hide_password else R.string.show_password))}},modifier=Modifier.fillMaxWidth().testTag("server_password"),enabled=!busy)
@@ -121,7 +130,8 @@ import java.time.format.FormatStyle
                             val chosen=calendars.filter { it.href in selection }
                             check(app.store.calendars().filter { it.remote && it.id !in selection }.all { app.store.pending(it.id).isEmpty() })
                             app.vault.save(account);app.store.setIdentity(account.endpoint,account.user);app.store.chooseCalendars(chosen)
-                        } };result=null;feedback=0;onChanged();SyncTasks.now(context) }
+                            initializeNasDefault(app.store,app.allowLocalCreation)
+                        } };result=null;feedback=0;onChanged();SyncTasks.manual(context) }
                         catch(e: Exception) { feedback=R.string.account_locked }
                         finally { busy=false }
                     }

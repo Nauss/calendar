@@ -9,8 +9,8 @@ android {
         applicationId = "fr.nauss.calendar"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.2.0-alpha.1"
+        versionCode = 6
+        versionName = "0.2.0-alpha.5"
         testInstrumentationRunner = "fr.nauss.calendar.IsolatedTestRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -34,6 +34,7 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("androidx.work:work-testing:2.10.3")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.08.01"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

@@ -63,12 +63,16 @@ import java.time.format.FormatStyle
     var zone by rememberSaveable(id) { mutableStateOf(initial.zone) };var startText by rememberSaveable(id) { mutableStateOf(initial.start.toString()) };var endText by rememberSaveable(id) { mutableStateOf(initial.end.toString()) }
     val start=LocalDateTime.parse(startText);val end=LocalDateTime.parse(endText)
     var allDay by rememberSaveable(id) { mutableStateOf(initial.allDay) };var repeat by rememberSaveable(id) { mutableStateOf(initial.repeat) };var reminder by rememberSaveable(id) { mutableIntStateOf(initial.reminderMinutes) }
-    val available=state.calendars.filter { it.writable && it.enabled }
-    var calendar by rememberSaveable(id) { mutableStateOf(id?.let { app.store.event(it)?.calendar } ?: state.defaultCalendar.takeIf { def -> available.any { it.id==def } } ?: "local") }
+    val available=if(id==null) creationCalendars(state.calendars,app.allowLocalCreation) else state.calendars.filter { it.writable && it.enabled }
+    var calendar by rememberSaveable(id) { mutableStateOf(initialRecord?.calendar ?: creationDefault(state.calendars,state.defaultCalendar,app.allowLocalCreation)) }
     var dirty by rememberSaveable(id) { mutableStateOf(false) };var discard by rememberSaveable(id) { mutableStateOf(false) };var submitting by remember { mutableStateOf(false) }
     val saving=submitting || navigating
     var error by remember { mutableIntStateOf(0) }
     val canEdit=id==null || capabilities?.editable==true
+    val destinationReady=id!=null || available.any { it.id==calendar }
+    LaunchedEffect(state.defaultCalendar,available,dirty) {
+        if(id==null && calendar.isEmpty() && !dirty) calendar=creationDefault(state.calendars,state.defaultCalendar,app.allowLocalCreation)
+    }
     val canTime=canEdit && capabilities?.timeEditable!=false && !saving
     val canZone=canEdit && capabilities?.timezoneEditable!=false && !saving
     val notificationText=stringResource(R.string.notification_denied)
@@ -84,7 +88,7 @@ import java.time.format.FormatStyle
             {onCancelNavigation(navigationRequest)},{onNavigate(navigationRequest)})
     } else if(discard && navigationRequest==null && !saving) ConfirmDialog(stringResource(R.string.discard_changes),"",stringResource(R.string.discard),{discard=false},onBack)
     Scaffold(topBar={ TopAppBar(title={Text(stringResource(if(id==null) R.string.new_event else R.string.edit_event))},navigationIcon={IconButton(onClick={back()},enabled=!saving){Icon(Icons.AutoMirrored.Filled.ArrowBack,stringResource(R.string.back))}},actions={
-        TextButton(enabled=canEdit && !saving && (title.isNotBlank() || (id!=null && title==initial.title)),modifier=Modifier.testTag("save_event"),onClick={
+        TextButton(enabled=canEdit && destinationReady && !saving && (title.isNotBlank() || (id!=null && title==initial.title)),modifier=Modifier.testTag("save_event"),onClick={
             submitting=true;error=0
             scope.launch {
                 try {
@@ -92,7 +96,7 @@ import java.time.format.FormatStyle
                     val newId=app.submissions.save(id,calendar,draft,baseVersion,submissionId.takeIf { id==null }).await()
                     onSaved(newId)
                 } catch(e: CancellationException) { throw e }
-                catch(e: Exception) { error=when(e.message) { "STALE_EDITOR" -> R.string.stale_editor; "CUSTOM_TIMEZONE" -> R.string.edit_timezone_mismatch; else -> R.string.invalid_event } } finally { submitting=false }
+                catch(e: Exception) { error=when(e.message) { "STALE_EDITOR" -> R.string.stale_editor; "CUSTOM_TIMEZONE" -> R.string.edit_timezone_mismatch; "NAS_REQUIRED" -> R.string.nas_required; else -> R.string.invalid_event } } finally { submitting=false }
             }
         }) { Text(stringResource(R.string.save)) }
     }) },snackbarHost={SnackbarHost(snack)}) { padding ->
@@ -100,7 +104,8 @@ import java.time.format.FormatStyle
             if(error!=0) Text(stringResource(error),color=MaterialTheme.colorScheme.error)
             OutlinedTextField(title,{title=it;dirty=true},enabled=canEdit && !saving,label={Text(stringResource(R.string.title))},modifier=Modifier.fillMaxWidth().testTag("event_title"),textStyle=MaterialTheme.typography.headlineSmall,maxLines=3)
             capabilities?.let { EditingRestrictions(it,"general") }
-            Choice(stringResource(R.string.calendar),calendar,available.map { it.id to (calendarName(it)+" · "+stringResource(if(it.remote) R.string.remote_label else R.string.local_label)) },enabled=id==null && !saving,tag="event_calendar") { calendar=it;dirty=true }
+            Choice(stringResource(R.string.calendar),calendar.ifEmpty { stringResource(R.string.choose_nas_calendar) },available.map { it.id to (calendarName(it)+" · "+stringResource(if(it.remote) R.string.remote_label else R.string.local_label)) },enabled=id==null && !saving && available.isNotEmpty(),tag="event_calendar") { calendar=it;dirty=true }
+            if(!destinationReady) Text(stringResource(R.string.nas_required),color=MaterialTheme.colorScheme.error,modifier=Modifier.testTag("nas_required"))
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Icon(Icons.Default.Schedule,null,modifier=Modifier.padding(end=16.dp));Text(stringResource(R.string.all_day),Modifier.weight(1f));Switch(allDay,{ value -> allDay=value;dirty=true;if(value) {startText=start.toLocalDate().atStartOfDay().toString();endText=maxOf(end.toLocalDate(),start.toLocalDate().plusDays(1)).atStartOfDay().toString()} },enabled=canZone,modifier=Modifier.testTag("all_day"))
             }

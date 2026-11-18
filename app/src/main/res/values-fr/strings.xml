@@ -121,4 +121,23 @@
     <string name="status">État de synchronisation</string>
     <string name="stale_detail">Cet événement a changé. Revenez en arrière et rouvrez-le avant de le modifier ou supprimer.</string>
     <string name="reminder_error">Certains rappels n’ont pas pu être préparés ou affichés. Vérifiez l’autorisation des notifications et les événements concernés, puis réessayez.</string>
+    <string name="sync_auth_reason">Authentification refusée (HTTP 401). Vérifiez les identifiants du compte. Les événements en cache et les modifications en attente sont conservés.</string>
+    <string name="sync_permission_reason">Accès refusé (HTTP 403). Vérifiez les droits de cet agenda sur le serveur. Les événements en cache et les modifications en attente sont conservés.</string>
+    <string name="sync_tls_reason">La connexion sécurisée n’a pas pu être vérifiée ou établie (TLS). Vérifiez le certificat et la date du téléphone, sans contourner la sécurité. Le cache et les modifications en attente sont conservés.</string>
+    <string name="sync_network_reason">Connexion interrompue ou serveur injoignable. Vérifiez la connexion puis réessayez. Les événements en cache et les modifications en attente sont conservés.</string>
+    <string name="sync_server_reason">Le serveur a renvoyé une réponse HTTP inattendue. La synchronisation reste incomplète ; le cache et les modifications en attente sont conservés.</string>
+    <string name="sync_data_reason">La réponse est partielle, illisible ou non prise en charge. Un seul événement peut bloquer la mise à jour de l’agenda. Aucune suppression n’est déduite de cette réponse ; le cache et les modifications en attente sont conservés.</string>
+    <string name="sync_conflict_reason">La révision serveur diffère ou une écriture n’a pas pu être confirmée sans risque. Votre version en attente est conservée : examinez-la avant de réessayer. Aucun écrasement forcé n’a été effectué.</string>
+    <string name="sync_retry_reason">Une modification locale n’a pas pu être rapprochée de la réponse après la tentative. Le cache et les changements non confirmés sont conservés. Réessayez avant de la modifier.</string>
+    <string name="sync_account_reason">Le compte enregistré est illisible ou ne correspond pas aux agendas en cache. La synchronisation est arrêtée ; le cache et les modifications en attente sont conservés. Vérifiez le compte.</string>
+    <string name="sync_schedule_reason">La synchronisation en arrière-plan n’a pas pu être programmée. Le cache et les modifications en attente sont conservés. Réessayez dans les paramètres.</string>
+    <string name="review_conflicts">Conflits de révision serveur</string>
+    <string name="review_deletions">Suppressions en attente</string>
+    <string name="review_unsupported">Événements non affichés</string>
+    <string name="pending_delete_reason">Ces suppressions attendent la confirmation du serveur. L’événement original reste en cache ; une suppression en attente n’est pas en soi un conflit.</string>
+    <string name="unsupported_review_reason">Ces événements en cache ne peuvent pas être affichés sur la période choisie. Cela ne signifie ni suppression ni conflit.</string>
+    <string name="unsupported_limit_reason">Certaines récurrences dépassent la limite de calcul ou de densité sur cette période. L’affichage est incomplet ; l’ICS original et les changements en attente sont conservés. Essayez une période plus courte ou le client d’origine.</string>
+    <string name="unsupported_recurrence_reason">Certaines règles de récurrence ou exceptions ne sont pas prises en charge ici. L’affichage est incomplet ; l’ICS original et les changements en attente sont conservés. Consultez ces événements dans le client d’origine.</string>
+    <string name="unsupported_data_reason">Certaines données ou certains fuseaux des événements en cache ne peuvent pas être lus sans risque. L’affichage est incomplet ; l’ICS original et les changements en attente sont conservés. Consultez le client d’origine ; aucune suppression n’est demandée.</string>
+    <string name="unsupported_timezone_reason">Certaines séries horaires traversent un changement d’heure ou utilisent un fuseau intégré. Leurs horaires ne peuvent pas être calculés ici sans risque. L’ICS original et les changements en attente sont conservés ; consultez le client d’origine.</string>
 </resources>

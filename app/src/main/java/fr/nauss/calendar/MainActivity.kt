@@ -217,10 +217,14 @@ fun nativeDate(context: android.content.Context,date: LocalDate,selected: (Local
                             Column(Modifier.fillMaxSize().padding(padding)) {
                                 if(state.syncing || state.pending>0 || state.syncError.isNotEmpty()) {
                                     Surface(color=if(state.syncError.isNotEmpty()) colors.errorContainer else colors.secondaryContainer,modifier=Modifier.fillMaxWidth().clickable { route="settings" }.testTag("sync_status")) {
-                                        Text(when {state.syncing->stringResource(R.string.syncing);state.syncError=="CONFLICT"->stringResource(R.string.conflict);state.syncError.isNotEmpty()->stringResource(R.string.sync_error);else->stringResource(R.string.pending,state.pending)},style=MaterialTheme.typography.bodySmall,modifier=Modifier.padding(horizontal=16.dp,vertical=10.dp),maxLines=3,overflow=TextOverflow.Ellipsis)
+                                        Box(Modifier.padding(horizontal=16.dp,vertical=10.dp)) { SyncStatusMessages(state) }
                                     }
                                 }
-                                if(state.unsupported.isNotEmpty()) TextButton(onClick={route="settings"}) { Text(stringResource(R.string.parse_error),style=MaterialTheme.typography.bodySmall) }
+                                if(state.unsupported.isNotEmpty()) TextButton(onClick={route="settings"},modifier=Modifier.testTag("unsupported_status")) {
+                                    Column {
+                                        state.unsupported.map { unsupportedReasonMessage(state.unsupportedReasons[it.id]) }.distinct().forEach { Text(stringResource(it),style=MaterialTheme.typography.bodySmall) }
+                                    }
+                                }
                                 if(searching) {
                                     Text(stringResource(R.string.search_range),style=MaterialTheme.typography.labelMedium,modifier=Modifier.padding(16.dp,6.dp))
                                     EventAgenda(state.events.filter { query.isNotBlank() && (it.occurrence.title.contains(query,true) || it.occurrence.location.contains(query,true)) },onEvent=::selectEvent,emptyText=stringResource(R.string.search_empty),from=date.withDayOfYear(1),until=date.withDayOfYear(1).plusYears(1),scrollKey=query)

@@ -1,0 +1,4 @@
+<resources>
+    <string name="allow_local_network">Allow access to a server on my local network</string>
+    <string name="local_network_denied">For a server on your home network, allow nearby devices in Android app permissions. An internet server does not need this permission.</string>
+</resources>

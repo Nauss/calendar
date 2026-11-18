@@ -14,6 +14,7 @@ class IsolatedTestRunner : AndroidJUnitRunner() {
 }
 class IsolatedAgendaApplication : AgendaApplication() {
     override val backgroundSyncEnabled=false
+    @Volatile override var allowLocalCreation=true
     override val vaultAlias="agenda-instrumentation-key"
     override val reminderNamespace="instrumentation"
     override val reminderAlarmsEnabled=false

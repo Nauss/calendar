@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="choose_nas_calendar">Choisir un agenda NAS</string>
+    <string name="nas_required">Choisis un agenda NAS disponible et accessible en écriture pour enregistrer. Ton brouillon reste ici ; aucun enregistrement Google ni repli silencieux sur un agenda local.</string>
+    <string name="nas_creation_hint">Les nouveaux événements sont destinés à l’agenda NAS choisi. Hors connexion, les modifications attendent sur ce téléphone avant leur envoi.</string>
+    <string name="auto_sync_policy">Envoi automatique des modifications dès que le réseau le permet. Vérification du NAS environ toutes les %1$d heures, selon les contraintes Android. La synchronisation manuelle reste disponible.</string>
+    <string name="last_upload">Dernier envoi terminé : %1$s</string>
+</resources>

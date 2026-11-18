@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="choose_nas_calendar">Choose a NAS calendar</string>
+    <string name="nas_required">Select an available, writable NAS calendar to save. Your draft stays here; nothing is saved to Google or silently switched to a local calendar.</string>
+    <string name="nas_creation_hint">New events are saved to the selected NAS calendar. Offline changes wait safely on this phone until they can be sent.</string>
+    <string name="auto_sync_policy">Changes are sent automatically when network access permits. The NAS is checked about every %1$d hours; Android may defer background work. Manual sync remains available.</string>
+    <string name="last_upload">Last completed upload: %1$s</string>
+</resources>

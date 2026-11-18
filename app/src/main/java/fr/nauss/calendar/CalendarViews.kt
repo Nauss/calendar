@@ -58,7 +58,7 @@ fun DisplayEvent.touches(day: LocalDate): Boolean {
     }
 }
 @Composable private fun PlanningCard(row: AgendaRow,onEvent: (DisplayEvent)->Unit) {
-    val event=row.event;val base=calendarColor(event.calendar.color);val foreground=calendarEventTextColor(base)
+    val event=row.event;val base=planningEventColor(event);val foreground=calendarEventTextColor(base)
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(base).clickable { onEvent(event) }.heightIn(min=48.dp).padding(horizontal=14.dp,vertical=10.dp).testTag("event_${event.record.id}")) {
         Text(event.occurrence.title.ifBlank { stringResource(R.string.untitled) },style=MaterialTheme.typography.titleMedium,color=foreground)
         Text(occurrenceTime(event),style=MaterialTheme.typography.bodyMedium,color=foreground)

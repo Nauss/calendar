@@ -7,7 +7,9 @@ import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ListView
+import android.widget.ImageView
 import android.widget.TextView
+import androidx.compose.ui.graphics.toArgb
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -23,6 +25,52 @@ import java.util.concurrent.ConcurrentHashMap
 /** Real system-bound providers, RemoteViews adapters and PendingIntents. Never a renderer-only test. */
 @RunWith(AndroidJUnit4::class)
 class WidgetHostTest {
+    @Test fun planningCardsShareTheAppsUidColorsAcrossThemesAdaptersAndOccurrences() {
+        val oldTheme=app.store.meta("theme","system")
+        val resources=(1..3).map { index -> DavClient.Resource(calendar+"color-$index.ics","\"color-$index\"",
+            raw("ISOLATED COLOR $index").replace("isolated-widget-host","widget-palette-$index")) }
+        app.store.applySnapshot(calendar,resources)
+        try {
+            for(legacy in listOf(false,true)) {
+                app.legacyWidgetCollections=legacy
+                val id=add(PlanningWidgetProvider::class.java)
+                for(theme in listOf("light","dark")) {
+                    app.store.setMeta("theme",theme);WidgetUpdates.render(app,intArrayOf(id))
+                    await("Color fixtures not loaded by the real collection adapter") {
+                        ui { host -> host.hosted.getValue(id).findViewById<ListView>(R.id.widget_list)?.count==9 &&
+                            host.hosted.getValue(id).findViewById<TextView>(R.id.widget_title).currentTextColor==android.graphics.Color.parseColor(if(theme=="dark") "#E3E3E3" else "#1F1F1F") }
+                    }
+                    val snapshot=rendered.getValue(id)
+                    assertEquals(3,snapshot.rows.map { planningEventColor(it.event) }.distinct().size)
+                    attachRow(id,0);instrumentation.waitForIdleSync()
+                    if(!legacy) {
+                        val screenshot=checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+                        try { java.io.File(app.storageContext.noBackupFilesDir,"widget-colors-$theme.png").outputStream().use { out ->
+                            assertTrue(screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out))
+                        } } finally { screenshot.recycle() }
+                    }
+                    snapshot.rows.forEachIndexed { position,row ->
+                        attachRow(id,position)
+                        ui { host ->
+                            val list=host.hosted.getValue(id).findViewById<ListView>(R.id.widget_list)
+                            val actual=checkNotNull(attachedRow(list,position));val background=actual.findViewById<ImageView>(R.id.widget_card_background)
+                            val bitmap=android.graphics.Bitmap.createBitmap(background.width,background.height,android.graphics.Bitmap.Config.ARGB_8888)
+                            val base=planningEventColor(row.event)
+                            try {
+                                background.draw(android.graphics.Canvas(bitmap))
+                                assertEquals("Widget must use the app color for this UID ($theme, legacy=$legacy)",base.toArgb(),bitmap.getPixel(bitmap.width/2,bitmap.height/2))
+                            } finally { bitmap.recycle() }
+                            val foreground=calendarEventTextColor(base).toArgb()
+                            listOf(R.id.widget_event_title,R.id.widget_event_time,R.id.widget_event_location).forEach { label ->
+                                assertEquals("Widget text must keep the app contrast policy",foreground,actual.findViewById<TextView>(label).currentTextColor)
+                            }
+                        }
+                    }
+                }
+                ui { it.removeWidgets() }
+            }
+        } finally { app.legacyWidgetCollections=false;app.store.setMeta("theme",oldTheme) }
+    }
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
     private val app get()=isolatedApp(ApplicationProvider.getApplicationContext<Context>())
     private val calendar="https://widget-host-fixture.invalid/events/"

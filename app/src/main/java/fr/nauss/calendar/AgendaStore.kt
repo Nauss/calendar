@@ -170,5 +170,6 @@ class AgendaStore(context: Context, name: String = "agenda.db",private val onWid
             if(meta("default_calendar")==cal.id) setMeta("default_calendar",archive)
         }
         setMeta("endpoint","");setMeta("username","");setMeta("sync_error","")
+        setMeta("full_sync_error","");setMeta("last_sync","");setMeta("last_upload","")
     }
 }

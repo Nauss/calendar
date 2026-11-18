@@ -121,4 +121,23 @@
     <string name="status">Synchronization status</string>
     <string name="stale_detail">This event has changed. Go back and reopen it before editing or deleting.</string>
     <string name="reminder_error">Some reminders could not be prepared or delivered. Check notification permission and the affected events, then retry.</string>
+    <string name="sync_auth_reason">Authentication refused (HTTP 401). Check the account credentials. Cached events and pending changes are retained.</string>
+    <string name="sync_permission_reason">Access refused (HTTP 403). Check calendar permissions on the server. Cached events and pending changes are retained.</string>
+    <string name="sync_tls_reason">The secure connection could not be verified or established (TLS). Check the certificate and device date; do not bypass security. Cached events and pending changes are retained.</string>
+    <string name="sync_network_reason">Connection interrupted or server unreachable. Check the connection and retry. Cached events and pending changes are retained.</string>
+    <string name="sync_server_reason">The server returned an unexpected HTTP response. Sync is incomplete; cached events and pending changes are retained.</string>
+    <string name="sync_data_reason">The response is partial, unreadable or unsupported. One event can block the calendar update. No deletion is inferred from this response; cached events and pending changes are retained.</string>
+    <string name="sync_conflict_reason">A server revision differs, or a write could not be safely reconciled. The pending version is retained; review it before retrying. No forced overwrite was made.</string>
+    <string name="sync_retry_reason">A local change could not be reconciled after the sync attempt. Cached data and unconfirmed changes are retained. Retry before editing it.</string>
+    <string name="sync_account_reason">The saved account could not be read or does not match the cached calendars. Sync stopped; cached events and pending changes are retained. Check account settings.</string>
+    <string name="sync_schedule_reason">Background sync could not be scheduled. Cached events and pending changes are retained. Retry from settings.</string>
+    <string name="review_conflicts">Server revision conflicts</string>
+    <string name="review_deletions">Pending deletions</string>
+    <string name="review_unsupported">Events not displayed</string>
+    <string name="pending_delete_reason">These deletions await server confirmation. The original event remains cached; a pending deletion is not itself a conflict.</string>
+    <string name="unsupported_review_reason">These cached events cannot be displayed in the selected range. This does not mean they are deleted or in conflict.</string>
+    <string name="unsupported_limit_reason">Some events exceed the safe recurrence work or density limit in this range. Display is incomplete; original ICS and pending changes are retained. Try a shorter range or the original client.</string>
+    <string name="unsupported_recurrence_reason">Some events use recurrence rules or exceptions not supported here. Display is incomplete; original ICS and pending changes are retained. Use the original client for these events.</string>
+    <string name="unsupported_data_reason">Some cached event data or time zones cannot be read safely here. Display is incomplete; original ICS and pending changes are retained. Use the original client; no deletion is requested.</string>
+    <string name="unsupported_timezone_reason">Some hourly series cross a clock change or use an embedded time zone. Their times cannot be expanded safely here. Original ICS and pending changes are retained; consult the original client.</string>
 </resources>
